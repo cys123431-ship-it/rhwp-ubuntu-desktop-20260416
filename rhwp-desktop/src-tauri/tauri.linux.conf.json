@@ -12,8 +12,13 @@
       "deb": {
         "depends": [
           "libgtk-3-0",
-          "libwebkit2gtk-4.1-0"
-        ]
+          "libwebkit2gtk-4.1-0",
+          "xdg-utils"
+        ],
+        "files": {
+          "/usr/share/applications/rhwp.desktop": "../packaging/linux/rhwp.desktop",
+          "/usr/share/mime/packages/rhwp-mime.xml": "../packaging/linux/rhwp-mime.xml"
+        }
       }
     }
   }

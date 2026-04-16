@@ -9,6 +9,7 @@ Current phase-1 scope:
 - Save with original extension policy from the studio session.
 - Persist recent documents in the app data directory.
 - Emit `rhwp://open-files` when startup files are passed on launch.
+- Package an Ubuntu `.deb` with desktop and MIME registration assets.
 
 Expected flow:
 
@@ -18,3 +19,15 @@ Expected flow:
 4. Run `npm run dev` or `npm run build`.
 
 Ubuntu packaging assets live under [packaging/linux](./packaging/linux).
+
+Ubuntu package build:
+
+1. On Ubuntu 22.04 or newer, install the Tauri Linux prerequisites.
+2. Run `npm run build:linux` inside `rhwp-desktop`.
+3. Pick up the generated `.deb` from `src-tauri/target/release/bundle/deb/`.
+
+GitHub Actions:
+
+- `.github/workflows/rhwp-desktop-linux.yml` builds the Ubuntu `.deb` on `ubuntu-22.04`.
+- The same workflow uploads the package as the `rhwp-ubuntu-deb` artifact.
+- A follow-up smoke-test job installs the built package on `ubuntu-24.04` and verifies the desktop and MIME files are present.
