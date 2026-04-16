@@ -11,6 +11,7 @@ async function saveDocument(
   format: DocumentFormat,
 ): Promise<void> {
   const fileName = services.session.current.fileName || `document.${format}`;
+  const recoverySnapshotId = services.session.current.recoverySnapshotId;
   const bytes = services.wasm.save(format);
   const result = await services.documentIO.saveDocument({
     mode,
@@ -26,6 +27,9 @@ async function saveDocument(
   services.wasm.filePath = result.filePath ?? '';
   services.wasm.clearDirty();
   services.session.applySaveResult(result);
+  if (recoverySnapshotId) {
+    await services.documentIO.deleteRecoverySnapshot(recoverySnapshotId);
+  }
   await services.documentIO.rememberRecentDocument(
     createRecentDocument(services.session.current, services.documentIO.kind),
   );

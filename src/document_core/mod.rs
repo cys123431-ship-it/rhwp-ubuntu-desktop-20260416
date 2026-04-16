@@ -158,6 +158,82 @@ pub struct ActiveFieldInfo {
 }
 
 impl DocumentCore {
+    fn compatibility_issue_entries(&self) -> Vec<(&'static str, &'static str, String)> {
+        let mut issues = Vec::new();
+
+        if self.document.header.encrypted {
+            issues.push((
+                "encrypted-document",
+                "blocker",
+                "Encrypted documents open in protected view during phase 1.".to_string(),
+            ));
+        }
+        if self.document.header.distribution {
+            issues.push((
+                "distribution-document",
+                "blocker",
+                "Distribution documents open in protected view to avoid save corruption.".to_string(),
+            ));
+        }
+        if !self.document.doc_info.font_faces.is_empty() {
+            issues.push((
+                "font-substitution",
+                "warning",
+                "Layout may differ if required Hancom fonts are missing on this system."
+                    .to_string(),
+            ));
+        }
+        if self.source_format == DocumentSourceFormat::Hwpx {
+            let report = self.hwpx_support_report();
+            issues.extend(
+                report
+                    .blockers
+                    .into_iter()
+                    .map(|message| ("hwpx-unsupported", "blocker", message)),
+            );
+            issues.extend(
+                report
+                    .warnings
+                    .into_iter()
+                    .map(|message| ("hwpx-warning", "warning", message)),
+            );
+        }
+
+        issues
+    }
+
+    fn font_substitution_entries(&self) -> Vec<(String, String, String, bool)> {
+        use crate::renderer::style_resolver::resolve_font_substitution;
+
+        let lang_names = [
+            "hangul",
+            "latin",
+            "hanja",
+            "japanese",
+            "other",
+            "symbol",
+            "user",
+        ];
+        let mut entries = std::collections::BTreeSet::new();
+
+        for (lang_idx, lang_fonts) in self.document.doc_info.font_faces.iter().enumerate() {
+            for font in lang_fonts {
+                let resolved = resolve_font_substitution(&font.name, font.alt_type, lang_idx)
+                    .unwrap_or(&font.name)
+                    .to_string();
+                let substituted = resolved != font.name;
+                entries.insert((
+                    lang_names.get(lang_idx).unwrap_or(&"hangul").to_string(),
+                    font.name.clone(),
+                    resolved,
+                    substituted,
+                ));
+            }
+        }
+
+        entries.into_iter().collect()
+    }
+
     /// 총 페이지 수를 반환한다.
     pub fn page_count(&self) -> u32 {
         self.pagination
@@ -230,6 +306,78 @@ impl DocumentCore {
         }
 
         warnings
+    }
+
+    pub fn get_compatibility_report(&self) -> String {
+        let issues = self
+            .compatibility_issue_entries()
+            .into_iter()
+            .map(|(code, severity, message)| {
+                format!(
+                    concat!(
+                        "{{",
+                        "\"code\":\"{}\",",
+                        "\"severity\":\"{}\",",
+                        "\"message\":\"{}\"",
+                        "}}"
+                    ),
+                    code,
+                    severity,
+                    json_escape(&message),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+
+        format!(
+            concat!(
+                "{{",
+                "\"sourceFormat\":\"{}\",",
+                "\"preferredSaveFormat\":\"{}\",",
+                "\"editMode\":\"{}\",",
+                "\"issues\":[{}]",
+                "}}"
+            ),
+            self.source_format.as_str(),
+            self.preferred_save_format().as_str(),
+            self.edit_mode().as_str(),
+            issues,
+        )
+    }
+
+    pub fn get_font_substitution_report(&self) -> String {
+        let entries = self
+            .font_substitution_entries()
+            .into_iter()
+            .map(|(lang, original, resolved, substituted)| {
+                format!(
+                    concat!(
+                        "{{",
+                        "\"lang\":\"{}\",",
+                        "\"original\":\"{}\",",
+                        "\"resolved\":\"{}\",",
+                        "\"substituted\":{}",
+                        "}}"
+                    ),
+                    json_escape(&lang),
+                    json_escape(&original),
+                    json_escape(&resolved),
+                    substituted,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+
+        format!(
+            concat!(
+                "{{",
+                "\"fallbackFont\":\"{}\",",
+                "\"items\":[{}]",
+                "}}"
+            ),
+            json_escape(&self.fallback_font),
+            entries,
+        )
     }
 
     pub fn get_document_capabilities(&self) -> String {
@@ -390,5 +538,52 @@ impl DocumentCore {
             active_field: None,
             para_offset: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::style::Font;
+    use serde_json::Value;
+
+    #[test]
+    fn compatibility_report_marks_encrypted_documents_as_blocked() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.document.header.encrypted = true;
+        core.file_path = "/tmp/report.hwpx".to_string();
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+        let issues = report["issues"].as_array().unwrap();
+
+        assert_eq!(report["sourceFormat"], "hwpx");
+        assert_eq!(report["preferredSaveFormat"], "hwpx");
+        assert_eq!(report["editMode"], "protected-view");
+        assert!(issues.iter().any(|issue| {
+            issue["code"] == "encrypted-document"
+                && issue["severity"] == "blocker"
+                && issue["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("protected view")
+        }));
+    }
+
+    #[test]
+    fn font_substitution_report_lists_declared_fonts() {
+        let mut core = DocumentCore::new_empty();
+        core.document.doc_info.font_faces = vec![vec![Font {
+            name: "CustomMissingFont".to_string(),
+            ..Default::default()
+        }]];
+
+        let report: Value = serde_json::from_str(&core.get_font_substitution_report()).unwrap();
+        let items = report["items"].as_array().unwrap();
+
+        assert_eq!(report["fallbackFont"], DEFAULT_FALLBACK_FONT);
+        assert!(items.iter().any(|item| {
+            item["lang"] == "hangul" && item["original"] == "CustomMissingFont"
+        }));
     }
 }

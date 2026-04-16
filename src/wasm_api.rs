@@ -270,6 +270,16 @@ impl HwpDocument {
         self.core.get_document_capabilities()
     }
 
+    #[wasm_bindgen(js_name = getCompatibilityReport)]
+    pub fn get_compatibility_report(&self) -> String {
+        self.core.get_compatibility_report()
+    }
+
+    #[wasm_bindgen(js_name = getFontSubstitutionReport)]
+    pub fn get_font_substitution_report(&self) -> String {
+        self.core.get_font_substitution_report()
+    }
+
     /// 문서 경고 목록을 JSON 배열 문자열로 반환한다.
     #[wasm_bindgen(js_name = getDocumentWarnings)]
     pub fn get_document_warnings(&self) -> String {

@@ -23,3 +23,34 @@
   background: #fff7d6;
   border-bottom-color: #ecd99a;
 }
+
+.session-banner__content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-banner__text {
+  flex: 1;
+}
+
+.session-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-banner__button {
+  border: 1px solid currentColor;
+  background: rgba(255, 255, 255, 0.6);
+  color: inherit;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.session-banner__button:hover {
+  background: rgba(255, 255, 255, 0.9);
+}

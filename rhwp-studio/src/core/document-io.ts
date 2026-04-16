@@ -1,5 +1,11 @@
 import { showSaveAs } from '@/ui/save-as-dialog';
-import type { DocumentFormat, RecentDocument } from './types';
+import type {
+  DocumentFormat,
+  FileAssociationStatus,
+  RecentDocument,
+  RecoverySnapshotMeta,
+  RecoverySnapshotPayload,
+} from './types';
 
 const RECENT_DOCS_KEY = 'rhwp.recent-documents';
 const MAX_RECENT_DOCS = 10;
@@ -53,10 +59,24 @@ export interface SaveDocumentResult {
   format: DocumentFormat;
 }
 
+export interface WriteRecoverySnapshotRequest {
+  snapshotId?: string;
+  fileName: string;
+  filePath?: string;
+  format: DocumentFormat;
+  bytes: Uint8Array;
+}
+
 export interface RhwpDesktopBridge {
   openDocument?: () => Promise<OpenDocumentResult | null>;
   saveDocument: (request: SaveDocumentRequest) => Promise<SaveDocumentResult | null>;
   getRecentDocuments?: () => Promise<RecentDocument[]>;
+  getFileAssociationStatus?: () => Promise<FileAssociationStatus>;
+  setDefaultFileAssociation?: () => Promise<FileAssociationStatus>;
+  listRecoverySnapshots?: () => Promise<RecoverySnapshotMeta[]>;
+  readRecoverySnapshot?: (snapshotId: string) => Promise<RecoverySnapshotPayload>;
+  writeRecoverySnapshot?: (request: WriteRecoverySnapshotRequest) => Promise<RecoverySnapshotMeta>;
+  deleteRecoverySnapshot?: (snapshotId: string) => Promise<void>;
   revealInFolder?: (path: string) => Promise<void>;
   onOpenFiles?: (handler: (files: OpenDocumentResult[]) => void) => void;
 }
@@ -67,6 +87,12 @@ export interface DocumentIO {
   saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null>;
   getRecentDocuments(): Promise<RecentDocument[]>;
   rememberRecentDocument(doc: RecentDocument): Promise<void>;
+  getFileAssociationStatus(): Promise<FileAssociationStatus | null>;
+  setDefaultFileAssociation(): Promise<FileAssociationStatus | null>;
+  listRecoverySnapshots(): Promise<RecoverySnapshotMeta[]>;
+  readRecoverySnapshot(snapshotId: string): Promise<RecoverySnapshotPayload | null>;
+  writeRecoverySnapshot(request: WriteRecoverySnapshotRequest): Promise<RecoverySnapshotMeta | null>;
+  deleteRecoverySnapshot(snapshotId: string): Promise<void>;
   revealInFolder(path: string): Promise<void>;
   onOpenFiles(handler: (files: OpenDocumentResult[]) => void): void;
 }
@@ -178,6 +204,30 @@ class WebDocumentIO implements DocumentIO {
     saveRecentDocuments(deduped);
   }
 
+  async getFileAssociationStatus(): Promise<FileAssociationStatus | null> {
+    return null;
+  }
+
+  async setDefaultFileAssociation(): Promise<FileAssociationStatus | null> {
+    return null;
+  }
+
+  async listRecoverySnapshots(): Promise<RecoverySnapshotMeta[]> {
+    return [];
+  }
+
+  async readRecoverySnapshot(_snapshotId: string): Promise<RecoverySnapshotPayload | null> {
+    return null;
+  }
+
+  async writeRecoverySnapshot(_request: WriteRecoverySnapshotRequest): Promise<RecoverySnapshotMeta | null> {
+    return null;
+  }
+
+  async deleteRecoverySnapshot(_snapshotId: string): Promise<void> {
+    return;
+  }
+
   async revealInFolder(_path: string): Promise<void> {
     return;
   }
@@ -214,6 +264,47 @@ class DesktopDocumentIO implements DocumentIO {
     saveRecentDocuments(deduped);
   }
 
+  async getFileAssociationStatus(): Promise<FileAssociationStatus | null> {
+    if (this.bridge.getFileAssociationStatus) {
+      return this.bridge.getFileAssociationStatus();
+    }
+    return null;
+  }
+
+  async setDefaultFileAssociation(): Promise<FileAssociationStatus | null> {
+    if (this.bridge.setDefaultFileAssociation) {
+      return this.bridge.setDefaultFileAssociation();
+    }
+    return null;
+  }
+
+  async listRecoverySnapshots(): Promise<RecoverySnapshotMeta[]> {
+    if (this.bridge.listRecoverySnapshots) {
+      return this.bridge.listRecoverySnapshots();
+    }
+    return [];
+  }
+
+  async readRecoverySnapshot(snapshotId: string): Promise<RecoverySnapshotPayload | null> {
+    if (this.bridge.readRecoverySnapshot) {
+      return this.bridge.readRecoverySnapshot(snapshotId);
+    }
+    return null;
+  }
+
+  async writeRecoverySnapshot(request: WriteRecoverySnapshotRequest): Promise<RecoverySnapshotMeta | null> {
+    if (this.bridge.writeRecoverySnapshot) {
+      return this.bridge.writeRecoverySnapshot(request);
+    }
+    return null;
+  }
+
+  async deleteRecoverySnapshot(snapshotId: string): Promise<void> {
+    if (this.bridge.deleteRecoverySnapshot) {
+      await this.bridge.deleteRecoverySnapshot(snapshotId);
+    }
+  }
+
   async revealInFolder(path: string): Promise<void> {
     if (this.bridge.revealInFolder) {
       await this.bridge.revealInFolder(path);
@@ -233,6 +324,12 @@ function createTauriBridge(): RhwpDesktopBridge | null {
     openDocument: () => invoke<OpenDocumentResult | null>('open_document'),
     saveDocument: (request) => invoke<SaveDocumentResult | null>('save_document', { request }),
     getRecentDocuments: () => invoke<RecentDocument[]>('get_recent_documents'),
+    getFileAssociationStatus: () => invoke<FileAssociationStatus>('get_file_association_status'),
+    setDefaultFileAssociation: () => invoke<FileAssociationStatus>('set_default_file_association'),
+    listRecoverySnapshots: () => invoke<RecoverySnapshotMeta[]>('list_recovery_snapshots'),
+    readRecoverySnapshot: (snapshotId) => invoke<RecoverySnapshotPayload>('read_recovery_snapshot', { snapshotId }),
+    writeRecoverySnapshot: (request) => invoke<RecoverySnapshotMeta>('write_recovery_snapshot', { request }),
+    deleteRecoverySnapshot: (snapshotId) => invoke<void>('delete_recovery_snapshot', { snapshotId }),
     revealInFolder: (path) => invoke<void>('reveal_in_folder', { path }),
     onOpenFiles: (handler) => {
       void window.__TAURI__?.event?.listen?.('rhwp://open-files', (event) => {

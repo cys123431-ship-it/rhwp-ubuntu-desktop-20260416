@@ -14,6 +14,53 @@ export interface DocumentInfo {
 /** WASM getPageInfo() 반환 타입 */
 export type DocumentFormat = 'hwp' | 'hwpx' | 'unknown';
 export type DocumentEditMode = 'editable-safe' | 'protected-view';
+export type CompatibilitySeverity = 'blocker' | 'warning';
+
+export interface CompatibilityIssue {
+  code: string;
+  severity: CompatibilitySeverity;
+  message: string;
+}
+
+export interface CompatibilityReport {
+  sourceFormat: DocumentFormat;
+  preferredSaveFormat: DocumentFormat;
+  editMode: DocumentEditMode;
+  issues: CompatibilityIssue[];
+}
+
+export interface FontSubstitutionItem {
+  lang: string;
+  original: string;
+  resolved: string;
+  substituted: boolean;
+}
+
+export interface FontSubstitutionReport {
+  fallbackFont: string;
+  items: FontSubstitutionItem[];
+}
+
+export interface FileAssociationStatus {
+  supported: boolean;
+  isDefault: boolean;
+  message: string;
+  defaultAppHwp?: string;
+  defaultAppHwpx?: string;
+  pendingMimeTypes: string[];
+}
+
+export interface RecoverySnapshotMeta {
+  id: string;
+  fileName: string;
+  filePath?: string;
+  format: DocumentFormat;
+  updatedAt: string;
+}
+
+export interface RecoverySnapshotPayload extends RecoverySnapshotMeta {
+  bytes: Uint8Array;
+}
 
 export interface DocumentCapabilities {
   sourceFormat: DocumentFormat;
@@ -43,6 +90,10 @@ export interface DocumentSession {
   distribution: boolean;
   blockers: string[];
   warnings: string[];
+  associationStatus: FileAssociationStatus | null;
+  recoverySnapshotId: string | null;
+  compatibilityIssues: CompatibilityIssue[];
+  fontSubstitutions: FontSubstitutionItem[];
 }
 
 export interface RecentDocument {

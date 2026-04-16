@@ -1,5 +1,5 @@
 import { WasmBridge } from '@/core/wasm-bridge';
-import type { DocumentInfo } from '@/core/types';
+import type { DocumentInfo, RecoverySnapshotMeta } from '@/core/types';
 import { EventBus } from '@/core/event-bus';
 import { createDocumentIO, type OpenDocumentResult } from '@/core/document-io';
 import { DocumentSessionStore, createRecentDocument } from '@/core/document-session';
@@ -25,6 +25,7 @@ import { CellSelectionRenderer } from '@/engine/cell-selection-renderer';
 import { TableObjectRenderer } from '@/engine/table-object-renderer';
 import { TableResizeRenderer } from '@/engine/table-resize-renderer';
 import { Ruler } from '@/view/ruler';
+import { showConfirm } from '@/ui/confirm-dialog';
 
 const wasm = new WasmBridge();
 const eventBus = new EventBus();
@@ -40,6 +41,9 @@ let canvasView: CanvasView | null = null;
 let inputHandler: InputHandler | null = null;
 let toolbar: Toolbar | null = null;
 let ruler: Ruler | null = null;
+let startupFilesReceived = false;
+let recoveryTimer: number | null = null;
+let recoveryWriteInFlight = false;
 
 
 // ─── 커맨드 시스템 ─────────────────────────────
@@ -95,28 +99,250 @@ const sbSection = () => document.getElementById('sb-section')!;
 const sbZoomVal = () => document.getElementById('sb-zoom-val')!;
 const sessionBanner = () => document.getElementById('session-banner')!;
 
+function toUint8Array(bytes: Uint8Array | number[]): Uint8Array {
+  return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+}
+
+function findMatchingRecoverySnapshot(
+  snapshots: RecoverySnapshotMeta[],
+  fileName: string,
+  filePath: string,
+  format: 'hwp' | 'hwpx',
+): RecoverySnapshotMeta | null {
+  if (filePath) {
+    return snapshots.find((snapshot) => snapshot.filePath === filePath) ?? null;
+  }
+
+  return snapshots.find((snapshot) =>
+    !snapshot.filePath
+    && snapshot.fileName === fileName
+    && snapshot.format === format,
+  ) ?? null;
+}
+
+async function refreshDesktopAssociationStatus(): Promise<void> {
+  if (documentIO.kind !== 'desktop') {
+    documentSession.setAssociationStatus(null);
+    renderSessionBanner();
+    return;
+  }
+
+  try {
+    documentSession.setAssociationStatus(await documentIO.getFileAssociationStatus());
+  } catch (error) {
+    console.warn('[desktop] file association status:', error);
+    documentSession.setAssociationStatus(null);
+  }
+
+  renderSessionBanner();
+}
+
 function renderSessionBanner(): void {
   const banner = sessionBanner();
   const session = documentSession.current;
+  const parts: string[] = [];
+  const actions: Array<{ label: string; handler: () => Promise<void> }> = [];
 
-  if (!session.hasDocument || (!session.isProtected && session.warnings.length === 0)) {
+  if (session.associationStatus?.supported && !session.associationStatus.isDefault) {
+    parts.push(session.associationStatus.message);
+    actions.push({
+      label: '기본 앱으로 설정',
+      handler: async () => {
+        documentSession.setAssociationStatus(await documentIO.setDefaultFileAssociation());
+        renderSessionBanner();
+      },
+    });
+  }
+
+  if (session.hasDocument && session.isProtected) {
+    parts.push(`Protected view: ${session.blockers.join(' ')}`);
+  }
+  if (session.hasDocument && session.warnings.length > 0) {
+    parts.push(session.warnings.join(' '));
+  }
+  if (session.hasDocument) {
+    const substitutedFonts = session.fontSubstitutions.filter((item) => item.substituted);
+    if (substitutedFonts.length > 0) {
+      const preview = substitutedFonts
+        .slice(0, 3)
+        .map((item) => `${item.original}->${item.resolved}`)
+        .join(', ');
+      const suffix = substitutedFonts.length > 3 ? ` and ${substitutedFonts.length - 3} more` : '';
+      parts.push(`Font substitutions active: ${preview}${suffix}`);
+    }
+  }
+
+  if (parts.length === 0) {
     banner.hidden = true;
-    banner.textContent = '';
+    banner.innerHTML = '';
     banner.className = 'session-banner';
     return;
   }
 
-  const parts: string[] = [];
-  if (session.isProtected) {
-    parts.push(`Protected view: ${session.blockers.join(' ')}`);
-  }
-  if (session.warnings.length > 0) {
-    parts.push(session.warnings.join(' '));
-  }
-
   banner.hidden = false;
   banner.className = `session-banner ${session.isProtected ? 'session-banner--protected' : 'session-banner--warning'}`;
-  banner.textContent = parts.join(' ');
+  banner.innerHTML = '';
+
+  const content = document.createElement('div');
+  content.className = 'session-banner__content';
+
+  const text = document.createElement('div');
+  text.className = 'session-banner__text';
+  text.textContent = parts.join(' ');
+  content.appendChild(text);
+
+  if (actions.length > 0) {
+    const actionsWrap = document.createElement('div');
+    actionsWrap.className = 'session-banner__actions';
+
+    for (const action of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'session-banner__button';
+      button.textContent = action.label;
+      button.addEventListener('click', () => {
+        void action.handler();
+      });
+      actionsWrap.appendChild(button);
+    }
+
+    content.appendChild(actionsWrap);
+  }
+
+  banner.appendChild(content);
+}
+
+async function confirmDiscardIfDirty(title: string, message: string): Promise<boolean> {
+  const session = documentSession.current;
+  if (!session.hasDocument || !session.dirty || session.isProtected) {
+    return true;
+  }
+
+  return showConfirm(title, message);
+}
+
+async function maybeRecoverOpenResult(
+  result: OpenDocumentResult,
+): Promise<{ result: OpenDocumentResult; snapshotId: string | null }> {
+  if (documentIO.kind !== 'desktop') {
+    return { result, snapshotId: null };
+  }
+
+  const format = result.fileName.toLowerCase().endsWith('.hwpx') ? 'hwpx' : 'hwp';
+
+  try {
+    const snapshots = await documentIO.listRecoverySnapshots();
+    const matching = findMatchingRecoverySnapshot(
+      snapshots,
+      result.fileName,
+      result.filePath ?? '',
+      format,
+    );
+    if (!matching) {
+      return { result, snapshotId: null };
+    }
+
+    const shouldRecover = await showConfirm(
+      '자동 복구 문서 열기',
+      `자동 복구본이 있습니다.\n\n문서: ${matching.fileName}\n시각: ${matching.updatedAt}\n\n자동 복구본으로 열까요?`,
+    );
+    if (!shouldRecover) {
+      return { result, snapshotId: null };
+    }
+
+    const snapshot = await documentIO.readRecoverySnapshot(matching.id);
+    if (!snapshot) {
+      return { result, snapshotId: null };
+    }
+
+    return {
+      result: {
+        fileName: snapshot.fileName,
+        filePath: snapshot.filePath,
+        data: toUint8Array(snapshot.bytes),
+      },
+      snapshotId: snapshot.id,
+    };
+  } catch (error) {
+    console.warn('[desktop] recovery lookup:', error);
+    return { result, snapshotId: null };
+  }
+}
+
+async function maybeRestoreUntitledRecovery(): Promise<void> {
+  if (documentIO.kind !== 'desktop' || documentSession.current.hasDocument || startupFilesReceived) {
+    return;
+  }
+
+  try {
+    const snapshots = await documentIO.listRecoverySnapshots();
+    const snapshotMeta = snapshots.find((snapshot) => !snapshot.filePath);
+    if (!snapshotMeta) {
+      return;
+    }
+
+    const shouldRecover = await showConfirm(
+      '자동 복구 문서 열기',
+      `저장되지 않은 자동 복구 문서가 있습니다.\n\n문서: ${snapshotMeta.fileName}\n시각: ${snapshotMeta.updatedAt}\n\n복구할까요?`,
+    );
+    if (!shouldRecover) {
+      return;
+    }
+
+    const snapshot = await documentIO.readRecoverySnapshot(snapshotMeta.id);
+    if (!snapshot) {
+      return;
+    }
+
+    const docInfo = wasm.loadDocument(
+      toUint8Array(snapshot.bytes),
+      snapshot.fileName,
+      snapshot.filePath ?? '',
+    );
+    /*
+    await initializeDocument(
+      docInfo,
+      `${snapshot.fileName} 자동 복구본`,
+      snapshot.fileName,
+      snapshot.filePath ?? '',
+      snapshot.id,
+    );
+    */
+    await initializeDocument(
+      docInfo,
+      `${snapshot.fileName} recovered draft`,
+      snapshot.fileName,
+      snapshot.filePath ?? '',
+      snapshot.id,
+    );
+    await rememberCurrentDocument();
+  } catch (error) {
+    console.warn('[desktop] untitled recovery:', error);
+  }
+}
+
+async function persistRecoverySnapshot(): Promise<void> {
+  const session = documentSession.current;
+  if (documentIO.kind !== 'desktop' || recoveryWriteInFlight) return;
+  if (!session.hasDocument || session.isProtected || !session.dirty) return;
+
+  recoveryWriteInFlight = true;
+  try {
+    const meta = await documentIO.writeRecoverySnapshot({
+      snapshotId: session.recoverySnapshotId ?? undefined,
+      fileName: session.fileName || `document.${session.saveFormat}`,
+      filePath: session.filePath || undefined,
+      format: session.saveFormat,
+      bytes: wasm.save(session.saveFormat),
+    });
+    if (meta) {
+      documentSession.setRecoverySnapshotId(meta.id);
+    }
+  } catch (error) {
+    console.warn('[desktop] autosave recovery snapshot:', error);
+  } finally {
+    recoveryWriteInFlight = false;
+  }
 }
 
 async function rememberCurrentDocument(): Promise<void> {
@@ -127,8 +353,24 @@ async function rememberCurrentDocument(): Promise<void> {
 }
 
 async function loadOpenResult(result: OpenDocumentResult): Promise<void> {
+  /*
   const docInfo = wasm.loadDocument(result.data, result.fileName, result.filePath ?? '');
   await initializeDocument(docInfo, `${result.fileName} · ${docInfo.pageCount}페이지`, result.fileName, result.filePath ?? '');
+  await rememberCurrentDocument();
+  */
+  const recovered = await maybeRecoverOpenResult(result);
+  const docInfo = wasm.loadDocument(
+    recovered.result.data,
+    recovered.result.fileName,
+    recovered.result.filePath ?? '',
+  );
+  await initializeDocument(
+    docInfo,
+    `${recovered.result.fileName} (${docInfo.pageCount} pages)`,
+    recovered.result.fileName,
+    recovered.result.filePath ?? '',
+    recovered.snapshotId,
+  );
   await rememberCurrentDocument();
 }
 
@@ -225,6 +467,17 @@ async function initialize(): Promise<void> {
     setupEventListeners();
     setupDocumentIOListeners();
     setupGlobalShortcuts();
+    void refreshDesktopAssociationStatus();
+    if (recoveryTimer === null) {
+      recoveryTimer = window.setInterval(() => {
+        void persistRecoverySnapshot();
+      }, 30000);
+    }
+    if (!new URLSearchParams(window.location.search).has('url')) {
+      window.setTimeout(() => {
+        void maybeRestoreUntitledRecovery();
+      }, 600);
+    }
     loadFromUrlParam();
 
     // E2E 테스트용 전역 노출 (개발 모드 전용)
@@ -274,6 +527,11 @@ function setupFileInput(): void {
       alert('HWP/HWPX 파일만 지원합니다.');
       return;
     }
+    const okayToOpen = await confirmDiscardIfDirty(
+      '문서 열기',
+      '저장하지 않은 변경 사항이 있습니다.\n현재 문서를 닫고 다른 문서를 열까요?',
+    );
+    if (!okayToOpen) return;
     await loadFile(file);
   });
 
@@ -300,12 +558,23 @@ function setupFileInput(): void {
       alert('HWP/HWPX 파일만 지원합니다.');
       return;
     }
+    const okayToDropOpen = await confirmDiscardIfDirty(
+      '문서 열기',
+      '저장하지 않은 변경 사항이 있습니다.\n현재 문서를 닫고 다른 문서를 열까요?',
+    );
+    if (!okayToDropOpen) return;
     await loadFile(file);
   });
 }
 
 function setupDocumentIOListeners(): void {
   eventBus.on('request-open-document', async () => {
+    const okayToOpen = await confirmDiscardIfDirty(
+      '문서 열기',
+      '저장하지 않은 변경 사항이 있습니다.\n현재 문서를 닫고 다른 문서를 열까요?',
+    );
+    if (!okayToOpen) return;
+
     if (documentIO.kind === 'desktop') {
       const result = await documentIO.openWithPicker();
       if (result) {
@@ -318,8 +587,14 @@ function setupDocumentIOListeners(): void {
   });
 
   documentIO.onOpenFiles(async (files) => {
+    startupFilesReceived = files.length > 0;
     const first = files[0];
     if (!first) return;
+    const okayToOpen = await confirmDiscardIfDirty(
+      '문서 열기',
+      '저장하지 않은 변경 사항이 있습니다.\n현재 문서를 닫고 다른 문서를 열까요?',
+    );
+    if (!okayToOpen) return;
     await loadOpenResult(first);
   });
 }
@@ -481,6 +756,7 @@ async function initializeDocument(
   displayName: string,
   fileName = wasm.fileName,
   filePath = wasm.filePath,
+  recoverySnapshotId: string | null = null,
 ): Promise<void> {
   const msg = sbMessage();
   try {
@@ -492,6 +768,11 @@ async function initializeDocument(
     }
     console.log('[initDoc] 2. 폰트 로딩 완료');
     documentSession.load(fileName, filePath, docInfo, wasm.getDocumentCapabilities());
+    documentSession.setRecoverySnapshotId(recoverySnapshotId);
+    documentSession.setReports(
+      wasm.getCompatibilityReport().issues,
+      wasm.getFontSubstitutionReport().items,
+    );
     renderSessionBanner();
     msg.textContent = displayName;
     totalSections = docInfo.sectionCount ?? 1;
@@ -604,6 +885,16 @@ async function loadFromUrlParam(): Promise<void> {
 }
 
 initialize();
+
+window.addEventListener('beforeunload', (event) => {
+  const session = documentSession.current;
+  if (!session.hasDocument || !session.dirty || session.isProtected) {
+    return;
+  }
+
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 // ── iframe 연동 API (postMessage) ──
 // 부모 페이지에서 postMessage로 에디터를 제어할 수 있다.

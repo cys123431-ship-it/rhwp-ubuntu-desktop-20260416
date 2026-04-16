@@ -3,6 +3,7 @@ name: Ubuntu Desktop Package
 on:
   push:
     branches: [main, devel]
+    tags: ['v*']
   pull_request:
     branches: [main, devel]
   workflow_dispatch:
@@ -83,13 +84,19 @@ jobs:
       contents: read
 
     steps:
+      - uses: actions/checkout@v5
+
       - name: Install runtime dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-0 \
             libwebkit2gtk-4.1-0 \
-            xdg-utils
+            xdg-utils \
+            desktop-file-utils \
+            shared-mime-info \
+            libglib2.0-bin \
+            xvfb
 
       - name: Download Debian package
         uses: actions/download-artifact@v4
@@ -105,3 +112,57 @@ jobs:
         run: |
           dpkg -L rhwp | grep '/usr/share/applications/rhwp.desktop'
           dpkg -L rhwp | grep '/usr/share/mime/packages/rhwp-mime.xml'
+          dpkg -L rhwp | grep '/usr/bin/rhwp$'
+          desktop-file-validate /usr/share/applications/rhwp.desktop
+          update-mime-database /usr/share/mime
+
+      - name: Verify file association command
+        run: |
+          xdg-mime default rhwp.desktop application/x-hwp
+          xdg-mime default rhwp.desktop application/x-hwpx
+          test "$(xdg-mime query default application/x-hwp)" = "rhwp.desktop"
+          test "$(xdg-mime query default application/x-hwpx)" = "rhwp.desktop"
+
+      - name: Launch app with sample HWP file
+        run: |
+          sample_path="$GITHUB_WORKSPACE/samples/re-01-hangul-only.hwp"
+          test -f "$sample_path"
+          set +e
+          xvfb-run -a timeout 20s rhwp "$sample_path"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+            exit "$status"
+          fi
+
+      - name: Launch app with sample HWPX file
+        run: |
+          sample_path="$GITHUB_WORKSPACE/samples/table-vpos-01.hwpx"
+          test -f "$sample_path"
+          set +e
+          xvfb-run -a timeout 20s rhwp "$sample_path"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+            exit "$status"
+          fi
+
+  publish-release:
+    name: Upload Debian Package To Release
+    runs-on: ubuntu-24.04
+    needs: [build-deb, install-smoke-test]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: rhwp-ubuntu-deb
+          path: dist
+
+      - name: Attach Debian package to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb

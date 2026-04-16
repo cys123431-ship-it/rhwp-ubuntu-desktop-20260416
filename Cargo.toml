@@ -63,6 +63,7 @@ js-sys = "0.3"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+serde_json = "1"
 
 # ── Clippy 린트 정책 ──
 # 리팩토링(타스크 142) 각 단계 완료 시 allow → warn → deny 전환

@@ -1,4 +1,13 @@
-import type { DocumentCapabilities, DocumentFormat, DocumentInfo, DocumentSession, RecentDocument } from './types';
+import type {
+  CompatibilityIssue,
+  DocumentCapabilities,
+  DocumentFormat,
+  DocumentInfo,
+  DocumentSession,
+  FileAssociationStatus,
+  FontSubstitutionItem,
+  RecentDocument,
+} from './types';
 
 const EMPTY_SESSION: DocumentSession = {
   hasDocument: false,
@@ -13,6 +22,10 @@ const EMPTY_SESSION: DocumentSession = {
   distribution: false,
   blockers: [],
   warnings: [],
+  associationStatus: null,
+  recoverySnapshotId: null,
+  compatibilityIssues: [],
+  fontSubstitutions: [],
 };
 
 function inferFormatFromName(fileName: string): DocumentFormat {
@@ -56,6 +69,10 @@ export class DocumentSessionStore {
       distribution: capabilities.distribution ?? docInfo.distribution,
       blockers: [...capabilities.blockers],
       warnings: [...capabilities.warnings],
+      associationStatus: this.session.associationStatus,
+      recoverySnapshotId: this.session.recoverySnapshotId,
+      compatibilityIssues: [...this.session.compatibilityIssues],
+      fontSubstitutions: [...this.session.fontSubstitutions],
     };
 
     return this.session;
@@ -95,6 +112,35 @@ export class DocumentSessionStore {
       sourceFormat: result.format,
       saveFormat: result.format,
       dirty: false,
+      recoverySnapshotId: null,
+    };
+    return this.session;
+  }
+
+  setAssociationStatus(status: FileAssociationStatus | null): DocumentSession {
+    this.session = {
+      ...this.session,
+      associationStatus: status,
+    };
+    return this.session;
+  }
+
+  setRecoverySnapshotId(snapshotId: string | null): DocumentSession {
+    this.session = {
+      ...this.session,
+      recoverySnapshotId: snapshotId,
+    };
+    return this.session;
+  }
+
+  setReports(
+    compatibilityIssues: CompatibilityIssue[],
+    fontSubstitutions: FontSubstitutionItem[],
+  ): DocumentSession {
+    this.session = {
+      ...this.session,
+      compatibilityIssues: [...compatibilityIssues],
+      fontSubstitutions: [...fontSubstitutions],
     };
     return this.session;
   }
@@ -130,4 +176,3 @@ export function createRecentDocument(session: DocumentSession, source: 'web' | '
     lastOpenedAt: new Date().toISOString(),
   };
 }
-

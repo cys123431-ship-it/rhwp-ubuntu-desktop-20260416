@@ -1,5 +1,5 @@
 import init, { HwpDocument, version } from '@wasm/rhwp.js';
-import type { DocumentInfo, PageInfo, PageDef, SectionDef, CursorRect, HitTestResult, LineInfo, TableDimensions, CellInfo, CellBbox, CellProperties, TableProperties, DocumentPosition, MoveVerticalResult, SelectionRect, CharProperties, ParaProperties, CellPathEntry, NavContextEntry, FieldInfoResult, BookmarkInfo, DocumentCapabilities, DocumentFormat } from './types';
+import type { DocumentInfo, PageInfo, PageDef, SectionDef, CursorRect, HitTestResult, LineInfo, TableDimensions, CellInfo, CellBbox, CellProperties, TableProperties, DocumentPosition, MoveVerticalResult, SelectionRect, CharProperties, ParaProperties, CellPathEntry, NavContextEntry, FieldInfoResult, BookmarkInfo, DocumentCapabilities, DocumentFormat, CompatibilityReport, FontSubstitutionReport } from './types';
 import { resolveFont, fontFamilyWithFallback } from './font-substitution';
 import { REGISTERED_FONTS } from './font-loader';
 
@@ -81,6 +81,7 @@ export class WasmBridge {
     this._filePath = filePath;
     this.doc = new HwpDocument(data);
     this.doc.setFileName(this._fileName);
+    this.refreshCapabilities();
     if (!this._filePath) {
       (this.doc as any).setFilePath('');
     }
@@ -157,6 +158,14 @@ export class WasmBridge {
 
   getPreferredSaveFormat(): DocumentFormat {
     return this.getDocumentCapabilities().preferredSaveFormat;
+  }
+
+  getCompatibilityReport(): CompatibilityReport {
+    return JSON.parse((this.ensureDocument() as any).getCompatibilityReport()) as CompatibilityReport;
+  }
+
+  getFontSubstitutionReport(): FontSubstitutionReport {
+    return JSON.parse((this.ensureDocument() as any).getFontSubstitutionReport()) as FontSubstitutionReport;
   }
 
   markDirty(): void {
@@ -1054,6 +1063,7 @@ export class WasmBridge {
   restoreSnapshot(id: number): void {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
     this.doc.restoreSnapshot(id);
+    this.refreshCapabilities();
   }
 
   discardSnapshot(id: number): void {
