@@ -2,6 +2,19 @@ import type { EventBus } from '@/core/event-bus';
 import type { CommandRegistry } from './registry';
 import type { CommandServices } from './types';
 
+const READ_ONLY_SAFE_COMMANDS = new Set([
+  'file:new-doc',
+  'file:open',
+  'file:about',
+  'file:print',
+  'edit:copy',
+  'edit:select-all',
+  'edit:find',
+  'edit:find-again',
+  'edit:goto',
+  'tool:options',
+]);
+
 /** 통합 커맨드 디스패처: 메뉴/툴바/키보드 모든 입력의 단일 실행 경로 */
 export class CommandDispatcher {
   constructor(
@@ -22,6 +35,9 @@ export class CommandDispatcher {
     }
 
     const ctx = this.services.getContext();
+    if (ctx.isProtected && !commandId.startsWith('view:') && !READ_ONLY_SAFE_COMMANDS.has(commandId)) {
+      return false;
+    }
     if (def.canExecute && !def.canExecute(ctx)) {
       // canExecute 실패 — 비활성 상태
       return false;
@@ -45,7 +61,11 @@ export class CommandDispatcher {
   isEnabled(commandId: string): boolean {
     const def = this.registry.get(commandId);
     if (!def) return false;
+    const ctx = this.services.getContext();
+    if (ctx.isProtected && !commandId.startsWith('view:') && !READ_ONLY_SAFE_COMMANDS.has(commandId)) {
+      return false;
+    }
     if (!def.canExecute) return true;
-    return def.canExecute(this.services.getContext());
+    return def.canExecute(ctx);
   }
 }

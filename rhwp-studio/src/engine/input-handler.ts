@@ -339,6 +339,16 @@ export class InputHandler {
         }
       });
     });
+    eventBus.on('document-view-changed', () => {
+      requestAnimationFrame(() => {
+        if (this.cursor.isInPictureObjectSelection()) {
+          this.renderPictureObjectSelection();
+        }
+        if (this.cursor.isInTableObjectSelection()) {
+          this.renderTableObjectSelection();
+        }
+      });
+    });
 
     // 투명선 수동 토글 상태 추적
     eventBus.on('transparent-borders-changed', (show) => {

@@ -264,6 +264,30 @@ impl HwpDocument {
         self.core.get_document_info()
     }
 
+    /// 문서 저장/편집 capability 정보를 JSON 문자열로 반환한다.
+    #[wasm_bindgen(js_name = getDocumentCapabilities)]
+    pub fn get_document_capabilities(&self) -> String {
+        self.core.get_document_capabilities()
+    }
+
+    /// 문서 경고 목록을 JSON 배열 문자열로 반환한다.
+    #[wasm_bindgen(js_name = getDocumentWarnings)]
+    pub fn get_document_warnings(&self) -> String {
+        let warnings = self.core.document_warnings();
+        let warnings_json = warnings
+            .iter()
+            .map(|item| format!("\"{}\"", json_escape(item)))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("[{}]", warnings_json)
+    }
+
+    /// 현재 문서의 기본 저장 포맷을 반환한다.
+    #[wasm_bindgen(js_name = getPreferredSaveFormat)]
+    pub fn get_preferred_save_format(&self) -> String {
+        self.core.preferred_save_format().as_str().to_string()
+    }
+
     /// 특정 페이지의 텍스트 레이아웃 정보를 JSON 문자열로 반환한다.
     ///
     /// 각 TextRun의 위치, 텍스트, 글자별 X 좌표 경계값을 포함한다.
@@ -288,6 +312,24 @@ impl HwpDocument {
     #[wasm_bindgen(js_name = setFileName)]
     pub fn set_file_name(&mut self, name: &str) {
         self.core.file_name = name.to_string();
+    }
+
+    /// 파일 경로를 설정한다.
+    #[wasm_bindgen(js_name = setFilePath)]
+    pub fn set_file_path(&mut self, path: &str) {
+        self.core.set_file_path_native(path);
+    }
+
+    /// dirty 플래그를 설정한다.
+    #[wasm_bindgen(js_name = markDirty)]
+    pub fn mark_dirty(&mut self) {
+        self.core.mark_dirty_native();
+    }
+
+    /// dirty 플래그를 해제한다.
+    #[wasm_bindgen(js_name = clearDirty)]
+    pub fn clear_dirty(&mut self) {
+        self.core.clear_dirty_native();
     }
 
     /// 현재 DPI를 반환한다.
@@ -2785,6 +2827,18 @@ impl HwpDocument {
     #[wasm_bindgen(js_name = exportHwp)]
     pub fn export_hwp(&self) -> Result<Vec<u8>, JsValue> {
         self.export_hwp_native().map_err(|e| e.into())
+    }
+
+    /// 문서를 HWPX 바이너리로 내보낸다.
+    #[wasm_bindgen(js_name = exportHwpx)]
+    pub fn export_hwpx(&self) -> Result<Vec<u8>, JsValue> {
+        self.export_hwpx_native().map_err(|e| e.into())
+    }
+
+    /// 지정한 포맷으로 문서를 저장용 바이너리로 직렬화한다.
+    #[wasm_bindgen(js_name = save)]
+    pub fn save(&self, format: &str) -> Result<Vec<u8>, JsValue> {
+        self.save_native(format).map_err(|e| e.into())
     }
 
     /// 배포용(읽기전용) 문서를 편집 가능한 일반 문서로 변환한다.

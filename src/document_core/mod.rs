@@ -27,6 +27,38 @@ use crate::renderer::DEFAULT_DPI;
 /// 기본 폰트 fallback 경로
 pub const DEFAULT_FALLBACK_FONT: &str = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentSourceFormat {
+    Hwp,
+    Hwpx,
+    Unknown,
+}
+
+impl DocumentSourceFormat {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            DocumentSourceFormat::Hwp => "hwp",
+            DocumentSourceFormat::Hwpx => "hwpx",
+            DocumentSourceFormat::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentEditMode {
+    EditableSafe,
+    ProtectedView,
+}
+
+impl DocumentEditMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            DocumentEditMode::EditableSafe => "editable-safe",
+            DocumentEditMode::ProtectedView => "protected-view",
+        }
+    }
+}
+
 /// 내부 클립보드 데이터
 pub(crate) struct ClipboardData {
     /// 복사된 문단들 (서식 정보 포함)
@@ -95,6 +127,14 @@ pub struct DocumentCore {
     pub(crate) hidden_header_footer: std::collections::HashSet<(u32, bool)>,
     /// 파일 이름 (머리말/꼬리말 필드 치환용)
     pub(crate) file_name: String,
+    /// 파일 경로 (데스크톱 세션 메타데이터)
+    pub(crate) file_path: String,
+    /// 원본 문서 포맷
+    pub(crate) source_format: DocumentSourceFormat,
+    /// 저장되지 않은 변경 여부
+    pub(crate) dirty: bool,
+    /// 원본 HWPX 패키지 바이트 (보호 모드 round-trip 보존용)
+    pub(crate) original_hwpx_package: Option<Vec<u8>>,
     /// 현재 활성 필드 위치 (커서가 진입한 누름틀 — 안내문 렌더링 스킵용)
     /// (section_idx, para_idx, field_control_idx)
     pub(crate) active_field: Option<ActiveFieldInfo>,
@@ -125,6 +165,112 @@ impl DocumentCore {
             .map(|pr| pr.pages.len() as u32)
             .sum::<u32>()
             .max(1)
+    }
+
+    pub fn source_format(&self) -> DocumentSourceFormat {
+        self.source_format
+    }
+
+    pub fn preferred_save_format(&self) -> DocumentSourceFormat {
+        match self.source_format {
+            DocumentSourceFormat::Unknown => DocumentSourceFormat::Hwp,
+            fmt => fmt,
+        }
+    }
+
+    pub fn edit_mode(&self) -> DocumentEditMode {
+        if self.document.header.encrypted
+            || self.document.header.distribution
+            || self.source_format == DocumentSourceFormat::Hwpx
+        {
+            DocumentEditMode::ProtectedView
+        } else {
+            DocumentEditMode::EditableSafe
+        }
+    }
+
+    pub fn is_protected_view(&self) -> bool {
+        self.edit_mode() == DocumentEditMode::ProtectedView
+    }
+
+    pub fn document_blockers(&self) -> Vec<String> {
+        let mut blockers = Vec::new();
+
+        if self.document.header.encrypted {
+            blockers.push("Encrypted documents open in protected view during phase 1.".to_string());
+        }
+        if self.document.header.distribution {
+            blockers.push("Distribution documents open in protected view to avoid save corruption.".to_string());
+        }
+        if self.source_format == DocumentSourceFormat::Hwpx {
+            blockers.push("HWPX documents stay in protected view until write-safe HWPX saving is complete.".to_string());
+        }
+
+        blockers
+    }
+
+    pub fn document_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        if !self.document.doc_info.font_faces.is_empty() {
+            warnings.push(
+                "Layout may differ if required Hancom fonts are missing on this system."
+                    .to_string(),
+            );
+        }
+
+        warnings
+    }
+
+    pub fn get_document_capabilities(&self) -> String {
+        let blockers = self.document_blockers();
+        let warnings = self.document_warnings();
+        let blockers_json = blockers
+            .iter()
+            .map(|item| format!("\"{}\"", json_escape(item)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let warnings_json = warnings
+            .iter()
+            .map(|item| format!("\"{}\"", json_escape(item)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let can_save_hwp = !self.is_protected_view();
+        let can_save_hwpx = !self.is_protected_view()
+            && self.source_format == DocumentSourceFormat::Hwpx
+            && self.original_hwpx_package.is_some()
+            && !self.dirty;
+
+        format!(
+            concat!(
+                "{{",
+                "\"sourceFormat\":\"{}\",",
+                "\"preferredSaveFormat\":\"{}\",",
+                "\"editMode\":\"{}\",",
+                "\"isProtected\":{},",
+                "\"dirty\":{},",
+                "\"encrypted\":{},",
+                "\"distribution\":{},",
+                "\"canSaveHwp\":{},",
+                "\"canSaveHwpx\":{},",
+                "\"filePath\":\"{}\",",
+                "\"blockers\":[{}],",
+                "\"warnings\":[{}]",
+                "}}"
+            ),
+            self.source_format.as_str(),
+            self.preferred_save_format().as_str(),
+            self.edit_mode().as_str(),
+            self.is_protected_view(),
+            self.dirty,
+            self.document.header.encrypted,
+            self.document.header.distribution,
+            can_save_hwp,
+            can_save_hwpx,
+            json_escape(&self.file_path),
+            blockers_json,
+            warnings_json,
+        )
     }
 
     /// 문서 정보를 JSON 문자열로 반환한다.
@@ -159,7 +305,19 @@ impl DocumentCore {
             c => vec![c],
         }).collect();
         format!(
-            "{{\"version\":\"{}.{}.{}.{}\",\"sectionCount\":{},\"pageCount\":{},\"encrypted\":{},\"fallbackFont\":\"{}\",\"fontsUsed\":[{}]}}",
+            concat!(
+                "{{",
+                "\"version\":\"{}.{}.{}.{}\",",
+                "\"sectionCount\":{},",
+                "\"pageCount\":{},",
+                "\"encrypted\":{},",
+                "\"distribution\":{},",
+                "\"sourceFormat\":\"{}\",",
+                "\"dirty\":{},",
+                "\"fallbackFont\":\"{}\",",
+                "\"fontsUsed\":[{}]",
+                "}}"
+            ),
             self.document.header.version.major,
             self.document.header.version.minor,
             self.document.header.version.build,
@@ -167,6 +325,9 @@ impl DocumentCore {
             self.document.sections.len(),
             self.page_count(),
             self.document.header.encrypted,
+            self.document.header.distribution,
+            self.source_format.as_str(),
+            self.dirty,
             escaped_fallback,
             fonts_json.join(","),
         )
@@ -214,6 +375,10 @@ impl DocumentCore {
             next_snapshot_id: 0,
             hidden_header_footer: std::collections::HashSet::new(),
             file_name: String::new(),
+            file_path: String::new(),
+            source_format: DocumentSourceFormat::Unknown,
+            dirty: false,
+            original_hwpx_package: None,
             active_field: None,
             para_offset: Vec::new(),
         }

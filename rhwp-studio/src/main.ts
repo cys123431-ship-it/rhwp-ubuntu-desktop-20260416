@@ -1,6 +1,8 @@
 import { WasmBridge } from '@/core/wasm-bridge';
 import type { DocumentInfo } from '@/core/types';
 import { EventBus } from '@/core/event-bus';
+import { createDocumentIO, type OpenDocumentResult } from '@/core/document-io';
+import { DocumentSessionStore, createRecentDocument } from '@/core/document-session';
 import { CanvasView } from '@/view/canvas-view';
 import { InputHandler } from '@/engine/input-handler';
 import { Toolbar } from '@/ui/toolbar';
@@ -26,6 +28,8 @@ import { Ruler } from '@/view/ruler';
 
 const wasm = new WasmBridge();
 const eventBus = new EventBus();
+const documentIO = createDocumentIO();
+const documentSession = new DocumentSessionStore();
 
 // E2E 테스트용 전역 노출 (개발 모드 전용)
 if (import.meta.env.DEV) {
@@ -42,6 +46,7 @@ let ruler: Ruler | null = null;
 const registry = new CommandRegistry();
 
 function getContext(): EditorContext {
+  const session = documentSession.current;
   return {
     hasDocument: wasm.pageCount > 0,
     hasSelection: inputHandler?.hasSelection() ?? false,
@@ -50,7 +55,10 @@ function getContext(): EditorContext {
     inTableObjectSelection: inputHandler?.isInTableObjectSelection() ?? false,
     inPictureObjectSelection: inputHandler?.isInPictureObjectSelection() ?? false,
     inField: inputHandler?.isInField() ?? false,
-    isEditable: true,
+    isEditable: session.hasDocument && !session.isProtected,
+    isProtected: session.isProtected,
+    canSave: session.hasDocument && !session.isProtected,
+    saveFormat: session.saveFormat,
     canUndo: inputHandler?.canUndo() ?? false,
     canRedo: inputHandler?.canRedo() ?? false,
     zoom: canvasView?.getViewportManager().getZoom() ?? 1.0,
@@ -61,6 +69,8 @@ function getContext(): EditorContext {
 const commandServices: CommandServices = {
   eventBus,
   wasm,
+  documentIO,
+  session: documentSession,
   getContext,
   getInputHandler: () => inputHandler,
   getViewportManager: () => canvasView?.getViewportManager() ?? null,
@@ -83,6 +93,44 @@ const sbMessage = () => document.getElementById('sb-message')!;
 const sbPage = () => document.getElementById('sb-page')!;
 const sbSection = () => document.getElementById('sb-section')!;
 const sbZoomVal = () => document.getElementById('sb-zoom-val')!;
+const sessionBanner = () => document.getElementById('session-banner')!;
+
+function renderSessionBanner(): void {
+  const banner = sessionBanner();
+  const session = documentSession.current;
+
+  if (!session.hasDocument || (!session.isProtected && session.warnings.length === 0)) {
+    banner.hidden = true;
+    banner.textContent = '';
+    banner.className = 'session-banner';
+    return;
+  }
+
+  const parts: string[] = [];
+  if (session.isProtected) {
+    parts.push(`Protected view: ${session.blockers.join(' ')}`);
+  }
+  if (session.warnings.length > 0) {
+    parts.push(session.warnings.join(' '));
+  }
+
+  banner.hidden = false;
+  banner.className = `session-banner ${session.isProtected ? 'session-banner--protected' : 'session-banner--warning'}`;
+  banner.textContent = parts.join(' ');
+}
+
+async function rememberCurrentDocument(): Promise<void> {
+  if (!documentSession.current.hasDocument) return;
+  await documentIO.rememberRecentDocument(
+    createRecentDocument(documentSession.current, documentIO.kind),
+  );
+}
+
+async function loadOpenResult(result: OpenDocumentResult): Promise<void> {
+  const docInfo = wasm.loadDocument(result.data, result.fileName, result.filePath ?? '');
+  await initializeDocument(docInfo, `${result.fileName} · ${docInfo.pageCount}페이지`, result.fileName, result.filePath ?? '');
+  await rememberCurrentDocument();
+}
 
 async function initialize(): Promise<void> {
   const msg = sbMessage();
@@ -175,6 +223,7 @@ async function initialize(): Promise<void> {
     setupFileInput();
     setupZoomControls();
     setupEventListeners();
+    setupDocumentIOListeners();
     setupGlobalShortcuts();
     loadFromUrlParam();
 
@@ -255,6 +304,26 @@ function setupFileInput(): void {
   });
 }
 
+function setupDocumentIOListeners(): void {
+  eventBus.on('request-open-document', async () => {
+    if (documentIO.kind === 'desktop') {
+      const result = await documentIO.openWithPicker();
+      if (result) {
+        await loadOpenResult(result);
+      }
+      return;
+    }
+
+    document.getElementById('file-input')?.click();
+  });
+
+  documentIO.onOpenFiles(async (files) => {
+    const first = files[0];
+    if (!first) return;
+    await loadOpenResult(first);
+  });
+}
+
 function setupZoomControls(): void {
   if (!canvasView) return;
   const vm = canvasView.getViewportManager();
@@ -322,6 +391,14 @@ function setupZoomControls(): void {
 let totalSections = 1;
 
 function setupEventListeners(): void {
+  eventBus.on('document-changed', () => {
+    if (!documentSession.current.hasDocument || documentSession.current.isProtected) return;
+    documentSession.markDirty();
+    wasm.markDirty();
+    renderSessionBanner();
+    eventBus.emit('command-state-changed');
+  });
+
   eventBus.on('current-page-changed', (page, _total) => {
     const pageIdx = page as number;
     sbPage().textContent = `${pageIdx + 1} / ${_total} 쪽`;
@@ -399,7 +476,12 @@ function setupEventListeners(): void {
 }
 
 /** 문서 초기화 공통 시퀀스 (loadFile, createNewDocument 양쪽에서 사용) */
-async function initializeDocument(docInfo: DocumentInfo, displayName: string): Promise<void> {
+async function initializeDocument(
+  docInfo: DocumentInfo,
+  displayName: string,
+  fileName = wasm.fileName,
+  filePath = wasm.filePath,
+): Promise<void> {
   const msg = sbMessage();
   try {
     console.log('[initDoc] 1. 폰트 로딩 시작');
@@ -409,6 +491,8 @@ async function initializeDocument(docInfo: DocumentInfo, displayName: string): P
       });
     }
     console.log('[initDoc] 2. 폰트 로딩 완료');
+    documentSession.load(fileName, filePath, docInfo, wasm.getDocumentCapabilities());
+    renderSessionBanner();
     msg.textContent = displayName;
     totalSections = docInfo.sectionCount ?? 1;
     sbSection().textContent = `구역: 1 / ${totalSections}`;
@@ -417,11 +501,16 @@ async function initializeDocument(docInfo: DocumentInfo, displayName: string): P
     console.log('[initDoc] 4. canvasView loadDocument');
     canvasView?.loadDocument();
     console.log('[initDoc] 5. toolbar setEnabled');
-    toolbar?.setEnabled(true);
+    toolbar?.setEnabled(!documentSession.current.isProtected);
     console.log('[initDoc] 6. toolbar initStyleDropdown');
     toolbar?.initStyleDropdown();
     console.log('[initDoc] 7. inputHandler activateWithCaretPosition');
-    inputHandler?.activateWithCaretPosition();
+    if (documentSession.current.isProtected) {
+      inputHandler?.deactivate();
+    } else {
+      inputHandler?.activateWithCaretPosition();
+    }
+    eventBus.emit('command-state-changed');
     console.log('[initDoc] 8. 완료');
   } catch (error) {
     console.error('[initDoc] 오류:', error);
@@ -435,7 +524,7 @@ async function loadFile(file: File): Promise<void> {
     msg.textContent = '파일 로딩 중...';
     const startTime = performance.now();
     const data = new Uint8Array(await file.arrayBuffer());
-    const docInfo = wasm.loadDocument(data, file.name);
+    const docInfo = wasm.loadDocument(data, file.name, '');
     const elapsed = performance.now() - startTime;
     await initializeDocument(docInfo, `${file.name} — ${docInfo.pageCount}페이지 (${elapsed.toFixed(1)}ms)`);
   } catch (error) {

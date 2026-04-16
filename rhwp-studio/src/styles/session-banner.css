@@ -1,0 +1,25 @@
+.session-banner {
+  display: block;
+  padding: 10px 16px;
+  border-bottom: 1px solid #d5dbe5;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1f2937;
+  background: #fff7d6;
+}
+
+.session-banner[hidden] {
+  display: none;
+}
+
+.session-banner--protected {
+  color: #7a1f1f;
+  background: #fde8e8;
+  border-bottom-color: #f0b8b8;
+}
+
+.session-banner--warning {
+  color: #5f4b12;
+  background: #fff7d6;
+  border-bottom-color: #ecd99a;
+}

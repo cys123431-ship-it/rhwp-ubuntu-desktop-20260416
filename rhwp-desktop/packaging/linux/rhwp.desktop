@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=rhwp
+Comment=Open and edit HWP and HWPX documents
+Exec=rhwp %F
+Terminal=false
+Type=Application
+MimeType=application/x-hwp;application/x-hwpx;
+Categories=Office;WordProcessor;
+StartupNotify=true

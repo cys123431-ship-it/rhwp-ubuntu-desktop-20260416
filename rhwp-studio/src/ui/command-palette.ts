@@ -137,6 +137,7 @@ export class CommandPalette {
           hasDocument: false, hasSelection: false, inTable: false,
           inCellSelectionMode: false, inTableObjectSelection: false,
           inPictureObjectSelection: false, inField: false, isEditable: true,
+          isProtected: false, canSave: false, saveFormat: 'hwp',
           canUndo: false, canRedo: false, zoom: 1.0, showControlCodes: false,
         };
         // canExecute(ctx=hasDocument:false) → false 인 경우도 목록에는 포함

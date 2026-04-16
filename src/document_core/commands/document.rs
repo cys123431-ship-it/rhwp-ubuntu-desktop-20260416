@@ -8,11 +8,16 @@ use crate::renderer::composer::{compose_section, reflow_line_segs};
 use crate::renderer::layout::LayoutEngine;
 use crate::renderer::page_layout::PageLayoutInfo;
 use crate::renderer::DEFAULT_DPI;
-use crate::document_core::{DocumentCore, DEFAULT_FALLBACK_FONT};
+use crate::document_core::{DocumentCore, DocumentSourceFormat, DEFAULT_FALLBACK_FONT};
 use crate::error::HwpError;
 
 impl DocumentCore {
     pub fn from_bytes(data: &[u8]) -> Result<DocumentCore, HwpError> {
+        let source_format = match crate::parser::detect_format(data) {
+            crate::parser::FileFormat::Hwp => DocumentSourceFormat::Hwp,
+            crate::parser::FileFormat::Hwpx => DocumentSourceFormat::Hwpx,
+            crate::parser::FileFormat::Unknown => DocumentSourceFormat::Unknown,
+        };
         let mut document = crate::parser::parse_document(data)
             .map_err(|e| HwpError::InvalidFile(e.to_string()))?;
 
@@ -61,6 +66,11 @@ impl DocumentCore {
             next_snapshot_id: 0,
             hidden_header_footer: std::collections::HashSet::new(),
             file_name: String::new(),
+            file_path: String::new(),
+            source_format,
+            dirty: false,
+            original_hwpx_package: (source_format == DocumentSourceFormat::Hwpx)
+                .then(|| data.to_vec()),
             active_field: None,
             para_offset: Vec::new(),
         };
@@ -246,6 +256,10 @@ impl DocumentCore {
         self.page_tree_cache.borrow_mut().clear();
         self.snapshot_store.clear();
         self.next_snapshot_id = 0;
+        self.source_format = DocumentSourceFormat::Hwp;
+        self.dirty = false;
+        self.original_hwpx_package = None;
+        self.file_path.clear();
 
         self.convert_to_editable_native()?;
         self.paginate();
@@ -259,10 +273,51 @@ impl DocumentCore {
             .map_err(|e| HwpError::RenderError(e.to_string()))
     }
 
+    pub fn export_hwpx_native(&self) -> Result<Vec<u8>, HwpError> {
+        if self.source_format != DocumentSourceFormat::Hwpx {
+            return Err(HwpError::RenderError(
+                "HWPX export is only available for documents loaded from HWPX in phase 1.".to_string(),
+            ));
+        }
+
+        if self.dirty {
+            return Err(HwpError::RenderError(
+                "Modified HWPX documents stay in protected view until write-safe HWPX saving is complete.".to_string(),
+            ));
+        }
+
+        self.original_hwpx_package.clone().ok_or_else(|| {
+            HwpError::RenderError("Original HWPX package is unavailable.".to_string())
+        })
+    }
+
+    pub fn save_native(&self, format: &str) -> Result<Vec<u8>, HwpError> {
+        match format {
+            "hwp" => self.export_hwp_native(),
+            "hwpx" => self.export_hwpx_native(),
+            other => Err(HwpError::RenderError(format!(
+                "Unsupported save format: {}",
+                other
+            ))),
+        }
+    }
+
     /// 배포용(읽기전용) 문서를 편집 가능한 일반 문서로 변환한다 (네이티브 에러 타입).
     pub fn convert_to_editable_native(&mut self) -> Result<String, HwpError> {
         let converted = self.document.convert_to_editable();
         Ok(format!("{{\"ok\":true,\"converted\":{}}}", converted))
+    }
+
+    pub fn set_file_path_native(&mut self, path: &str) {
+        self.file_path = path.to_string();
+    }
+
+    pub fn mark_dirty_native(&mut self) {
+        self.dirty = true;
+    }
+
+    pub fn clear_dirty_native(&mut self) {
+        self.dirty = false;
     }
 
     /// 문서의 IR 참조를 반환한다 (네이티브 전용).

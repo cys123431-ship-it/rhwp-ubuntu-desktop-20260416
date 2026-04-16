@@ -5,15 +5,18 @@
  * showSaveAs() 헬퍼로 간단히 사용 가능.
  */
 import { ModalDialog } from './dialog';
+import type { DocumentFormat } from '@/core/types';
 
 class SaveAsDialog extends ModalDialog {
   private defaultName: string;
+  private format: DocumentFormat;
   private input!: HTMLInputElement;
   private resolve!: (value: string | null) => void;
 
-  constructor(defaultName: string) {
+  constructor(defaultName: string, format: DocumentFormat) {
     super('다른 이름으로 저장', 380);
     this.defaultName = defaultName;
+    this.format = format;
   }
 
   protected createBody(): HTMLElement {
@@ -51,7 +54,8 @@ class SaveAsDialog extends ModalDialog {
   protected onConfirm(): void {
     const name = this.input.value.trim();
     if (!name) return;
-    const fileName = name.endsWith('.hwp') ? name : name + '.hwp';
+    const extension = this.format === 'hwpx' ? '.hwpx' : '.hwp';
+    const fileName = name.toLowerCase().endsWith(extension) ? name : name + extension;
     this.resolve(fileName);
   }
 
@@ -79,6 +83,6 @@ class SaveAsDialog extends ModalDialog {
 }
 
 /** 파일 이름 입력 대화상자를 표시하고 사용자가 입력한 파일 이름을 반환한다. 취소 시 null. */
-export function showSaveAs(defaultName: string): Promise<string | null> {
-  return new SaveAsDialog(defaultName).showAsync();
+export function showSaveAs(defaultName: string, format: DocumentFormat = 'hwp'): Promise<string | null> {
+  return new SaveAsDialog(defaultName, format).showAsync();
 }

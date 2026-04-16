@@ -1,23 +1,45 @@
-import type { CommandDef } from '../types';
+import type { CommandDef, CommandServices } from '../types';
+import type { DocumentFormat } from '@/core/types';
 import { PageSetupDialog } from '@/ui/page-setup-dialog';
 import { AboutDialog } from '@/ui/about-dialog';
 import { showConfirm } from '@/ui/confirm-dialog';
-import { showSaveAs } from '@/ui/save-as-dialog';
+import { createRecentDocument } from '@/core/document-session';
 
-// File System Access API (Chrome/Edge)
-declare global {
-  interface Window {
-    showSaveFilePicker?: (options?: {
-      suggestedName?: string;
-      types?: { description: string; accept: Record<string, string[]> }[];
-    }) => Promise<FileSystemFileHandle>;
-  }
+async function saveDocument(
+  services: CommandServices,
+  mode: 'save' | 'save-as',
+  format: DocumentFormat,
+): Promise<void> {
+  const fileName = services.session.current.fileName || `document.${format}`;
+  const bytes = services.wasm.save(format);
+  const result = await services.documentIO.saveDocument({
+    mode,
+    fileName,
+    filePath: services.session.current.filePath,
+    format,
+    bytes,
+  });
+
+  if (!result) return;
+
+  services.wasm.fileName = result.fileName;
+  services.wasm.filePath = result.filePath ?? '';
+  services.wasm.clearDirty();
+  services.session.applySaveResult(result);
+  await services.documentIO.rememberRecentDocument(
+    createRecentDocument(services.session.current, services.documentIO.kind),
+  );
+  services.eventBus.emit('command-state-changed');
+}
+
+function getSaveMode(services: CommandServices): 'save' | 'save-as' {
+  return services.wasm.isNewDocument ? 'save-as' : 'save';
 }
 
 export const fileCommands: CommandDef[] = [
   {
     id: 'file:new-doc',
-    label: '새로 만들기',
+    label: '?덈줈 留뚮뱾湲?',
     icon: 'icon-new-doc',
     shortcutLabel: 'Alt+N',
     canExecute: () => true,
@@ -25,8 +47,8 @@ export const fileCommands: CommandDef[] = [
       const ctx = services.getContext();
       if (ctx.hasDocument) {
         const ok = await showConfirm(
-          '새로 만들기',
-          '현재 문서를 닫고 새 문서를 만드시겠습니까?\n저장하지 않은 내용은 사라집니다.',
+          '?덈줈 留뚮뱾湲?',
+          '?꾩옱 臾몄꽌瑜??リ퀬 ??臾몄꽌瑜?留뚮뱶?쒓쿋?듬땲源?\n??ν븯吏 ?딆? ?댁슜? ?щ씪吏묐땲??',
         );
         if (!ok) return;
       }
@@ -35,79 +57,54 @@ export const fileCommands: CommandDef[] = [
   },
   {
     id: 'file:open',
-    label: '열기',
-    execute() {
-      document.getElementById('file-input')?.click();
+    label: '?닿린',
+    execute(services) {
+      services.eventBus.emit('request-open-document');
     },
   },
   {
     id: 'file:save',
-    label: '저장',
+    label: '???',
     icon: 'icon-save',
     shortcutLabel: 'Ctrl+S',
-    canExecute: (ctx) => ctx.hasDocument,
+    canExecute: (ctx) => ctx.hasDocument && ctx.canSave,
     async execute(services) {
       try {
-        const saveName = services.wasm.fileName;
-        const bytes = services.wasm.exportHwp();
-        const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/x-hwp' });
-
-        // 1) File System Access API 지원 시 네이티브 저장 대화상자 사용
-        if ('showSaveFilePicker' in window) {
-          try {
-            const handle = await window.showSaveFilePicker!({
-              suggestedName: saveName,
-              types: [{
-                description: 'HWP 문서',
-                accept: { 'application/x-hwp': ['.hwp'] },
-              }],
-            });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-            services.wasm.fileName = handle.name;
-            console.log(`[file:save] ${handle.name} (${(bytes.length / 1024).toFixed(1)}KB)`);
-            return;
-          } catch (e) {
-            // 사용자가 취소하면 AbortError 발생 — 무시
-            if (e instanceof DOMException && e.name === 'AbortError') return;
-            // 그 외 오류는 폴백으로 진행
-            console.warn('[file:save] File System Access API 실패, 폴백:', e);
-          }
-        }
-
-        // 2) 폴백: 새 문서인 경우 자체 파일이름 대화상자 표시
-        let downloadName = saveName;
-        if (services.wasm.isNewDocument) {
-          const baseName = saveName.replace(/\.hwp$/i, '');
-          const result = await showSaveAs(baseName);
-          if (!result) return;
-          downloadName = result;
-          services.wasm.fileName = downloadName;
-        }
-
-        // 3) Blob 다운로드
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = downloadName;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-        console.log(`[file:save] ${downloadName} (${(bytes.length / 1024).toFixed(1)}KB)`);
+        await saveDocument(services, getSaveMode(services), services.getContext().saveFormat);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error('[file:save] 저장 실패:', msg);
-        alert(`파일 저장에 실패했습니다:\n${msg}`);
+        console.error('[file:save] ????ㅽ뙣:', msg);
+        alert(`?뚯씪 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎:\n${msg}`);
+      }
+    },
+  },
+  {
+    id: 'file:save-as',
+    label: '?ㅻⅨ ?대쫫?쇰줈 ???',
+    canExecute: (ctx) => ctx.hasDocument && ctx.canSave,
+    async execute(services, params) {
+      try {
+        const requestedFormat = params?.format as DocumentFormat | undefined;
+        await saveDocument(
+          services,
+          'save-as',
+          requestedFormat && requestedFormat !== 'unknown'
+            ? requestedFormat
+            : services.getContext().saveFormat,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[file:save-as] ????ㅽ뙣:', msg);
+        alert(`?뚯씪 ??μ뿉 ?ㅽ뙣?덉뒿?덈떎:\n${msg}`);
       }
     },
   },
   {
     id: 'file:page-setup',
-    label: '편집 용지',
+    label: '?몄쭛 ?⑹?',
     icon: 'icon-page-setup',
     shortcutLabel: 'F7',
-    canExecute: (ctx) => ctx.hasDocument,
+    canExecute: (ctx) => ctx.hasDocument && ctx.isEditable,
     execute(services) {
       const dialog = new PageSetupDialog(services.wasm, services.eventBus, 0);
       dialog.show();
@@ -115,7 +112,7 @@ export const fileCommands: CommandDef[] = [
   },
   {
     id: 'file:print',
-    label: '인쇄',
+    label: '?몄뇙',
     icon: 'icon-print',
     shortcutLabel: 'Ctrl+P',
     canExecute: (ctx) => ctx.hasDocument,
@@ -124,30 +121,24 @@ export const fileCommands: CommandDef[] = [
       const pageCount = wasm.pageCount;
       if (pageCount === 0) return;
 
-      // 진행률 표시
       const statusEl = document.getElementById('sb-message');
       const origStatus = statusEl?.textContent || '';
 
       try {
-        // SVG 페이지 생성
         const svgPages: string[] = [];
         for (let i = 0; i < pageCount; i++) {
-          if (statusEl) statusEl.textContent = `인쇄 준비 중... (${i + 1}/${pageCount})`;
-          const svg = wasm.renderPageSvg(i);
-          svgPages.push(svg);
-          // UI 갱신을 위한 양보
-          if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+          if (statusEl) statusEl.textContent = `?몄뇙 以鍮?以?.. (${i + 1}/${pageCount})`;
+          svgPages.push(wasm.renderPageSvg(i));
+          if (i % 5 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
         }
 
-        // 첫 페이지 정보로 용지 크기 결정
         const pageInfo = wasm.getPageInfo(0);
         const widthMm = Math.round(pageInfo.width * 25.4 / 96);
         const heightMm = Math.round(pageInfo.height * 25.4 / 96);
 
-        // 인쇄 전용 창 생성
         const printWin = window.open('', '_blank');
         if (!printWin) {
-          alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.');
+          alert('?앹뾽??李⑤떒?섏뿀?듬땲?? ?앹뾽 ?덉슜 ???ㅼ떆 ?쒕룄?댁＜?몄슂.');
           return;
         }
 
@@ -155,7 +146,7 @@ export const fileCommands: CommandDef[] = [
 <html>
 <head>
 <meta charset="UTF-8">
-<title>${wasm.fileName} — 인쇄</title>
+<title>${wasm.fileName} ???몄뇙</title>
 <style>
   @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; }
   * { margin: 0; padding: 0; }
@@ -176,17 +167,16 @@ export const fileCommands: CommandDef[] = [
 </head>
 <body>
 <div class="print-bar">
-  <button id="print-btn">인쇄</button>
-  <button id="close-btn" style="background:#475569">닫기</button>
-  <span>${wasm.fileName} — ${pageCount}페이지</span>
+  <button id="print-btn">?몄뇙</button>
+  <button id="close-btn" style="background:#475569">?リ린</button>
+  <span>${wasm.fileName} ??${pageCount}?섏씠吏</span>
 </div>
-${svgPages.map(svg => `<div class="page">${svg}</div>`).join('\n')}
+${svgPages.map((svg) => `<div class="page">${svg}</div>`).join('\n')}
 
 </body>
 </html>`);
         printWin.document.close();
 
-        // CSP 안전: DOM API로 이벤트 바인딩 (인라인 스크립트 사용 안 함)
         printWin.document.getElementById('print-btn')?.addEventListener('click', () => {
           printWin.print();
         });
@@ -198,13 +188,13 @@ ${svgPages.map(svg => `<div class="page">${svg}</div>`).join('\n')}
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error('[file:print]', msg);
-        if (statusEl) statusEl.textContent = `인쇄 실패: ${msg}`;
+        if (statusEl) statusEl.textContent = `?몄뇙 ?ㅽ뙣: ${msg}`;
       }
     },
   },
   {
     id: 'file:about',
-    label: '제품 정보',
+    label: '?쒗뭹 ?뺣낫',
     icon: 'icon-help',
     execute() {
       new AboutDialog().show();

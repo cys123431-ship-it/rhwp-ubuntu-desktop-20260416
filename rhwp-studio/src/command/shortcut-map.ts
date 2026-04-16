@@ -20,6 +20,7 @@ export const defaultShortcuts: [ShortcutDef, string][] = [
   [{ key: 'n', alt: true }, 'file:new-doc'],
   [{ key: 'ㅜ', alt: true }, 'file:new-doc'],
   [{ key: 's', ctrl: true }, 'file:save'],
+  [{ key: 's', ctrl: true, shift: true }, 'file:save-as'],
   [{ key: 'p', ctrl: true }, 'file:print'],
 
   // 서식

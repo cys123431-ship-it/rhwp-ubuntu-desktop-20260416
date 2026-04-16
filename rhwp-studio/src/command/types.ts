@@ -1,4 +1,7 @@
 import type { EventBus } from '@/core/event-bus';
+import type { DocumentIO } from '@/core/document-io';
+import type { DocumentSessionStore } from '@/core/document-session';
+import type { DocumentFormat } from '@/core/types';
 import type { WasmBridge } from '@/core/wasm-bridge';
 import type { InputHandler } from '@/engine/input-handler';
 import type { ViewportManager } from '@/view/viewport-manager';
@@ -21,6 +24,9 @@ export interface EditorContext {
   inField: boolean;
   /** 편집 가능 모드인가? (vs 읽기 전용) */
   isEditable: boolean;
+  isProtected: boolean;
+  canSave: boolean;
+  saveFormat: DocumentFormat;
   /** Undo 가능한가? */
   canUndo: boolean;
   /** Redo 가능한가? */
@@ -54,6 +60,8 @@ export interface CommandDef {
 export interface CommandServices {
   eventBus: EventBus;
   wasm: WasmBridge;
+  documentIO: DocumentIO;
+  session: DocumentSessionStore;
   /** 현재 에디터 상태 스냅샷 */
   getContext: () => EditorContext;
   /** InputHandler 접근 (문서 미로드 시 null) */

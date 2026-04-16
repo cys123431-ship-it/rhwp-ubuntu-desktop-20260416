@@ -1,5 +1,5 @@
 import init, { HwpDocument, version } from '@wasm/rhwp.js';
-import type { DocumentInfo, PageInfo, PageDef, SectionDef, CursorRect, HitTestResult, LineInfo, TableDimensions, CellInfo, CellBbox, CellProperties, TableProperties, DocumentPosition, MoveVerticalResult, SelectionRect, CharProperties, ParaProperties, CellPathEntry, NavContextEntry, FieldInfoResult, BookmarkInfo } from './types';
+import type { DocumentInfo, PageInfo, PageDef, SectionDef, CursorRect, HitTestResult, LineInfo, TableDimensions, CellInfo, CellBbox, CellProperties, TableProperties, DocumentPosition, MoveVerticalResult, SelectionRect, CharProperties, ParaProperties, CellPathEntry, NavContextEntry, FieldInfoResult, BookmarkInfo, DocumentCapabilities, DocumentFormat } from './types';
 import { resolveFont, fontFamilyWithFallback } from './font-substitution';
 import { REGISTERED_FONTS } from './font-loader';
 
@@ -32,6 +32,8 @@ export class WasmBridge {
   private doc: HwpDocument | null = null;
   private initialized = false;
   private _fileName = 'document.hwp';
+  private _filePath = '';
+  private _capabilities: DocumentCapabilities | null = null;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -59,15 +61,35 @@ export class WasmBridge {
     };
   }
 
-  loadDocument(data: Uint8Array, fileName?: string): DocumentInfo {
+  private ensureDocument(): HwpDocument {
+    if (!this.doc) throw new Error('문서가 로드되지 않았습니다.');
+    return this.doc;
+  }
+
+  private refreshCapabilities(): DocumentCapabilities {
+    const capabilities = JSON.parse((this.ensureDocument() as any).getDocumentCapabilities()) as DocumentCapabilities;
+    this._capabilities = capabilities;
+    this._filePath = capabilities.filePath || this._filePath;
+    return capabilities;
+  }
+
+  loadDocument(data: Uint8Array, fileName?: string, filePath = ''): DocumentInfo {
     if (this.doc) {
       this.doc.free();
     }
     this._fileName = fileName ?? 'document.hwp';
+    this._filePath = filePath;
     this.doc = new HwpDocument(data);
-    this.doc.convertToEditable();
     this.doc.setFileName(this._fileName);
+    if (!this._filePath) {
+      (this.doc as any).setFilePath('');
+    }
+    this.refreshCapabilities();
+    if (this._filePath) {
+      (this.doc as any).setFilePath(this._filePath);
+    }
     const info: DocumentInfo = JSON.parse(this.doc.getDocumentInfo());
+    this.refreshCapabilities();
     console.log(`[WasmBridge] 문서 로드: ${info.pageCount}페이지`);
     return info;
   }
@@ -78,6 +100,7 @@ export class WasmBridge {
       this.doc = HwpDocument.createEmpty();
     }
     const info: DocumentInfo = JSON.parse(this.doc.createBlankDocument());
+    this._filePath = '';
     this._fileName = '새 문서.hwp';
     this.doc.setFileName(this._fileName);
     console.log(`[WasmBridge] 새 문서 생성: ${info.pageCount}페이지`);
@@ -90,6 +113,21 @@ export class WasmBridge {
 
   set fileName(name: string) {
     this._fileName = name;
+    if (this.doc) {
+      this.doc.setFileName(name);
+    }
+  }
+
+  get filePath(): string {
+    return this._filePath;
+  }
+
+  set filePath(path: string) {
+    this._filePath = path;
+    if (this.doc) {
+      (this.doc as any).setFilePath(path);
+      this.refreshCapabilities();
+    }
   }
 
   get isNewDocument(): boolean {
@@ -98,7 +136,39 @@ export class WasmBridge {
 
   exportHwp(): Uint8Array {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
-    return this.doc.exportHwp();
+    return this.ensureDocument().exportHwp();
+  }
+
+  exportHwpx(): Uint8Array {
+    return (this.ensureDocument() as any).exportHwpx();
+  }
+
+  save(format: DocumentFormat): Uint8Array {
+    return (this.ensureDocument() as any).save(format);
+  }
+
+  getDocumentCapabilities(): DocumentCapabilities {
+    return this.refreshCapabilities();
+  }
+
+  getDocumentWarnings(): string[] {
+    return [...this.getDocumentCapabilities().warnings];
+  }
+
+  getPreferredSaveFormat(): DocumentFormat {
+    return this.getDocumentCapabilities().preferredSaveFormat;
+  }
+
+  markDirty(): void {
+    if (!this.doc) return;
+    (this.doc as any).markDirty();
+    this.refreshCapabilities();
+  }
+
+  clearDirty(): void {
+    if (!this.doc) return;
+    (this.doc as any).clearDirty();
+    this.refreshCapabilities();
   }
 
   get pageCount(): number {

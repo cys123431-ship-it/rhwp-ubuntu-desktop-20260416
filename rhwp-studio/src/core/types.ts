@@ -4,11 +4,55 @@ export interface DocumentInfo {
   sectionCount: number;
   pageCount: number;
   encrypted: boolean;
+  distribution: boolean;
+  sourceFormat: DocumentFormat;
+  dirty: boolean;
   fallbackFont: string;
   fontsUsed: string[];  // 문서에서 사용하는 폰트 이름 목록
 }
 
 /** WASM getPageInfo() 반환 타입 */
+export type DocumentFormat = 'hwp' | 'hwpx' | 'unknown';
+export type DocumentEditMode = 'editable-safe' | 'protected-view';
+
+export interface DocumentCapabilities {
+  sourceFormat: DocumentFormat;
+  preferredSaveFormat: DocumentFormat;
+  editMode: DocumentEditMode;
+  isProtected: boolean;
+  dirty: boolean;
+  encrypted: boolean;
+  distribution: boolean;
+  canSaveHwp: boolean;
+  canSaveHwpx: boolean;
+  filePath: string;
+  blockers: string[];
+  warnings: string[];
+}
+
+export interface DocumentSession {
+  hasDocument: boolean;
+  fileName: string;
+  filePath: string;
+  sourceFormat: DocumentFormat;
+  saveFormat: DocumentFormat;
+  editMode: DocumentEditMode;
+  isProtected: boolean;
+  dirty: boolean;
+  encrypted: boolean;
+  distribution: boolean;
+  blockers: string[];
+  warnings: string[];
+}
+
+export interface RecentDocument {
+  name: string;
+  path?: string;
+  format: DocumentFormat;
+  source: 'web' | 'desktop';
+  lastOpenedAt: string;
+}
+
 export interface PageInfo {
   pageIndex: number;
   width: number;
