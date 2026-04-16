@@ -274,21 +274,8 @@ impl DocumentCore {
     }
 
     pub fn export_hwpx_native(&self) -> Result<Vec<u8>, HwpError> {
-        if self.source_format != DocumentSourceFormat::Hwpx {
-            return Err(HwpError::RenderError(
-                "HWPX export is only available for documents loaded from HWPX in phase 1.".to_string(),
-            ));
-        }
-
-        if self.dirty {
-            return Err(HwpError::RenderError(
-                "Modified HWPX documents stay in protected view until write-safe HWPX saving is complete.".to_string(),
-            ));
-        }
-
-        self.original_hwpx_package.clone().ok_or_else(|| {
-            HwpError::RenderError("Original HWPX package is unavailable.".to_string())
-        })
+        crate::serializer::serialize_hwpx(&self.document)
+            .map_err(|e| HwpError::RenderError(e.to_string()))
     }
 
     pub fn save_native(&self, format: &str) -> Result<Vec<u8>, HwpError> {

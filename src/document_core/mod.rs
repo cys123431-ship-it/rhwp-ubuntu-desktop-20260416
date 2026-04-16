@@ -178,15 +178,22 @@ impl DocumentCore {
         }
     }
 
+    fn hwpx_support_report(&self) -> crate::serializer::HwpxSupportReport {
+        crate::serializer::analyze_hwpx_support(&self.document)
+    }
+
     pub fn edit_mode(&self) -> DocumentEditMode {
-        if self.document.header.encrypted
-            || self.document.header.distribution
-            || self.source_format == DocumentSourceFormat::Hwpx
-        {
-            DocumentEditMode::ProtectedView
-        } else {
-            DocumentEditMode::EditableSafe
+        if self.document.header.encrypted || self.document.header.distribution {
+            return DocumentEditMode::ProtectedView;
         }
+
+        if self.source_format == DocumentSourceFormat::Hwpx
+            && !self.hwpx_support_report().is_supported()
+        {
+            return DocumentEditMode::ProtectedView;
+        }
+
+        DocumentEditMode::EditableSafe
     }
 
     pub fn is_protected_view(&self) -> bool {
@@ -203,7 +210,7 @@ impl DocumentCore {
             blockers.push("Distribution documents open in protected view to avoid save corruption.".to_string());
         }
         if self.source_format == DocumentSourceFormat::Hwpx {
-            blockers.push("HWPX documents stay in protected view until write-safe HWPX saving is complete.".to_string());
+            blockers.extend(self.hwpx_support_report().blockers);
         }
 
         blockers
@@ -217,6 +224,9 @@ impl DocumentCore {
                 "Layout may differ if required Hancom fonts are missing on this system."
                     .to_string(),
             );
+        }
+        if self.source_format == DocumentSourceFormat::Hwpx {
+            warnings.extend(self.hwpx_support_report().warnings);
         }
 
         warnings
@@ -235,11 +245,9 @@ impl DocumentCore {
             .map(|item| format!("\"{}\"", json_escape(item)))
             .collect::<Vec<_>>()
             .join(",");
+        let hwpx_report = self.hwpx_support_report();
         let can_save_hwp = !self.is_protected_view();
-        let can_save_hwpx = !self.is_protected_view()
-            && self.source_format == DocumentSourceFormat::Hwpx
-            && self.original_hwpx_package.is_some()
-            && !self.dirty;
+        let can_save_hwpx = hwpx_report.is_supported();
 
         format!(
             concat!(

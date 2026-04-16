@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 #[derive(Default)]
 struct StartupFiles {
@@ -202,13 +201,12 @@ fn get_recent_documents(app: AppHandle) -> Result<Vec<RecentDocument>, String> {
 }
 
 #[tauri::command]
-fn reveal_in_folder(path: String) -> Result<(), String> {
-    let target = PathBuf::from(path);
-    let parent = target.parent().unwrap_or(target.as_path());
-
+fn reveal_in_folder(_path: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        Command::new("xdg-open")
+        let target = PathBuf::from(_path);
+        let parent = target.parent().unwrap_or(target.as_path());
+        std::process::Command::new("xdg-open")
             .arg(parent)
             .spawn()
             .map_err(|err| err.to_string())?;
@@ -219,7 +217,7 @@ fn reveal_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
-fn emit_startup_files(window: &WebviewWindow, startup: &State<StartupFiles>) {
+fn emit_startup_files<R: Runtime>(window: &impl Emitter<R>, startup: &State<StartupFiles>) {
     let payload = {
         let mut guard = startup.files.lock().expect("startup files mutex");
         if guard.is_empty() {

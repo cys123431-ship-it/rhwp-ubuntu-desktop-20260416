@@ -9,10 +9,12 @@ pub mod cfb_writer;
 pub mod control;
 pub mod doc_info;
 pub mod header;
+pub mod hwpx_writer;
 pub mod mini_cfb;
 pub mod record_writer;
 
 pub use cfb_writer::{serialize_hwp, SerializeError};
+pub use hwpx_writer::{analyze_hwpx_support, serialize_hwpx, HwpxSupportReport};
 
 use crate::model::document::Document;
 

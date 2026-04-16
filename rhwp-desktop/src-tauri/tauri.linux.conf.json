@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "icon": [
+      "../../assets/logo/logo-32.png",
+      "../../assets/logo/logo-128.png",
+      "../../assets/logo/logo-512.png"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libgtk-3-0",
+          "libwebkit2gtk-4.1-0"
+        ]
+      }
+    }
+  }
+}
