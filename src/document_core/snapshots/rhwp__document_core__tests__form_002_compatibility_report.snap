@@ -3,37 +3,12 @@ source: src/document_core/mod.rs
 expression: report
 ---
 {
-  "editMode": "protected-view",
+  "editMode": "editable-safe",
   "issues": [
     {
       "code": "font-substitution",
       "message": "Layout may differ if required Hancom fonts are missing on this system.",
       "severity": "warning"
-    },
-    {
-      "code": "hwpx-form",
-      "message": "Paragraph 0 in section 0 uses form controls that are not written to HWPX yet.",
-      "severity": "blocker"
-    },
-    {
-      "code": "hwpx-form",
-      "message": "Paragraph 2 in section 0 uses form controls that are not written to HWPX yet.",
-      "severity": "blocker"
-    },
-    {
-      "code": "hwpx-form",
-      "message": "Paragraph 3 in section 0 uses form controls that are not written to HWPX yet.",
-      "severity": "blocker"
-    },
-    {
-      "code": "hwpx-form",
-      "message": "Paragraph 4 in section 0 uses form controls that are not written to HWPX yet.",
-      "severity": "blocker"
-    },
-    {
-      "code": "hwpx-form",
-      "message": "Paragraph 5 in section 0 uses form controls that are not written to HWPX yet.",
-      "severity": "blocker"
     }
   ],
   "preferredSaveFormat": "hwpx",

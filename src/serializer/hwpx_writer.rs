@@ -3,9 +3,10 @@ use std::io::{Cursor, Write};
 
 use zip::write::SimpleFileOptions;
 
+use crate::document_core::helpers::find_control_text_positions;
 use crate::model::control::{
-    AutoNumber, AutoNumberType, Bookmark, Control, Field, FieldType, NewNumber, PageHide,
-    PageNumberPos,
+    AutoNumber, AutoNumberType, Bookmark, Control, Equation, Field, FieldType, FormObject,
+    FormType, HiddenComment, NewNumber, PageHide, PageNumberPos, Ruby,
 };
 use crate::model::document::{Document, Section, SectionDef};
 use crate::model::header_footer::HeaderFooterApply;
@@ -13,16 +14,15 @@ use crate::model::image::{ImageEffect, Picture};
 use crate::model::page::{ColumnDef, ColumnDirection, ColumnType, PageDef};
 use crate::model::paragraph::{ColumnBreakType, Paragraph};
 use crate::model::shape::{
-    Caption, CaptionDirection, CaptionVertAlign, CommonObjAttr, HorzAlign, HorzRelTo,
-    ShapeObject, TextWrap, VertAlign, VertRelTo,
+    Caption, CaptionDirection, CaptionVertAlign, CommonObjAttr, HorzAlign, HorzRelTo, ShapeObject,
+    TextWrap, VertAlign, VertRelTo,
 };
 use crate::model::style::{
-    Alignment, BorderFill, BorderLine, BorderLineType, Bullet, CharShape, FillType, Font,
-    HeadType, ImageFillMode, LineSpacingType, Numbering, ParaShape, TabDef, UnderlineType,
+    Alignment, BorderFill, BorderLine, BorderLineType, Bullet, CharShape, FillType, Font, HeadType,
+    ImageFillMode, LineSpacingType, Numbering, ParaShape, TabDef, UnderlineType,
 };
 use crate::model::table::{Cell, Table, TablePageBreak, VerticalAlign};
 use crate::parser::hwpx::reader::{HwpxPackageEntryRole, HwpxPackageSnapshot};
-use crate::document_core::helpers::find_control_text_positions;
 
 use super::cfb_writer::SerializeError;
 
@@ -264,7 +264,8 @@ mod tests_clean {
         assert!(clean_report
             .issues
             .iter()
-            .any(|issue| issue.code == "hwpx-section-extra-records" && issue.severity == HwpxIssueSeverity::Warning));
+            .any(|issue| issue.code == "hwpx-section-extra-records"
+                && issue.severity == HwpxIssueSeverity::Warning));
 
         let dirty_report = analyze_hwpx_support_with_context(
             &document,
@@ -278,7 +279,8 @@ mod tests_clean {
         assert!(dirty_report
             .issues
             .iter()
-            .any(|issue| issue.code == "hwpx-section-extra-records" && issue.severity == HwpxIssueSeverity::Blocker));
+            .any(|issue| issue.code == "hwpx-section-extra-records"
+                && issue.severity == HwpxIssueSeverity::Blocker));
     }
 
     #[test]
@@ -402,21 +404,11 @@ mod tests_clean {
             panic!("expected rectangle shape");
         };
         assert_eq!(
-            rect.drawing
-                .text_box
-                .as_ref()
-                .expect("textbox")
-                .paragraphs[0]
-                .text,
+            rect.drawing.text_box.as_ref().expect("textbox").paragraphs[0].text,
             "textbox"
         );
         assert_eq!(
-            rect.drawing
-                .caption
-                .as_ref()
-                .expect("caption")
-                .paragraphs[0]
-                .text,
+            rect.drawing.caption.as_ref().expect("caption").paragraphs[0].text,
             "caption"
         );
     }
@@ -491,8 +483,8 @@ mod tests_clean {
         let mut out = Cursor::new(Vec::<u8>::new());
         {
             let mut writer = ZipWriter::new(&mut out);
-            let options = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let options =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
             for entry in &base_snapshot.entries {
                 writer.start_file(&entry.path, options).unwrap();
@@ -518,6 +510,353 @@ mod tests_clean {
             .entry("META-INF/custom.xml")
             .expect("preserved extra entry");
         assert_eq!(extra.bytes, b"<custom preserved=\"yes\"/>");
+    }
+
+    #[test]
+    fn test_analyze_hwpx_support_allows_basic_form_controls() {
+        let mut document = Document::default();
+        let mut paragraph = Paragraph::new_empty();
+        paragraph.controls.push(Control::Form(Box::new(FormObject {
+            form_type: FormType::CheckBox,
+            name: "CheckBox1".to_string(),
+            caption: "Option A".to_string(),
+            width: 6400,
+            height: 1700,
+            enabled: true,
+            ..Default::default()
+        })));
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+        assert!(!report.issues.iter().any(|issue| issue.code == "hwpx-form"));
+    }
+
+    #[test]
+    fn test_supported_form_roundtrip_checkbox_combo_and_edit() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let checkbox = FormObject {
+            form_type: FormType::CheckBox,
+            name: "CheckBox1".to_string(),
+            caption: "Agree".to_string(),
+            text: String::new(),
+            width: 6519,
+            height: 1700,
+            fore_color: 0,
+            back_color: 0x00FF_FFFF,
+            value: 1,
+            enabled: true,
+            properties: std::collections::HashMap::from([
+                ("radioGroupName".to_string(), String::new()),
+                ("triState".to_string(), "0".to_string()),
+                ("backStyle".to_string(), "OPAQUE".to_string()),
+                ("groupName".to_string(), String::new()),
+                ("tabStop".to_string(), "1".to_string()),
+                ("editable".to_string(), "1".to_string()),
+                ("tabOrder".to_string(), "1".to_string()),
+                ("borderTypeIDRef".to_string(), "0".to_string()),
+                ("drawFrame".to_string(), "1".to_string()),
+                ("printable".to_string(), "1".to_string()),
+                ("command".to_string(), String::new()),
+                ("sz.widthRelTo".to_string(), "ABSOLUTE".to_string()),
+                ("sz.heightRelTo".to_string(), "ABSOLUTE".to_string()),
+                ("sz.protect".to_string(), "0".to_string()),
+                ("pos.treatAsChar".to_string(), "1".to_string()),
+                ("pos.affectLSpacing".to_string(), "0".to_string()),
+                ("pos.flowWithText".to_string(), "1".to_string()),
+                ("pos.allowOverlap".to_string(), "1".to_string()),
+                ("pos.holdAnchorAndSO".to_string(), "0".to_string()),
+                ("pos.vertRelTo".to_string(), "PARA".to_string()),
+                ("pos.horzRelTo".to_string(), "PARA".to_string()),
+                ("pos.vertAlign".to_string(), "TOP".to_string()),
+                ("pos.horzAlign".to_string(), "LEFT".to_string()),
+                ("pos.vertOffset".to_string(), "0".to_string()),
+                ("pos.horzOffset".to_string(), "0".to_string()),
+                ("outMargin.left".to_string(), "0".to_string()),
+                ("outMargin.right".to_string(), "0".to_string()),
+                ("outMargin.top".to_string(), "0".to_string()),
+                ("outMargin.bottom".to_string(), "0".to_string()),
+                ("formCharPr.charPrIDRef".to_string(), "0".to_string()),
+                ("formCharPr.followContext".to_string(), "0".to_string()),
+                ("formCharPr.autoSz".to_string(), "0".to_string()),
+                ("formCharPr.wordWrap".to_string(), "0".to_string()),
+            ]),
+        };
+
+        let combo = FormObject {
+            form_type: FormType::ComboBox,
+            name: "ComboBox1".to_string(),
+            text: "Beta".to_string(),
+            width: 7200,
+            height: 1700,
+            enabled: true,
+            properties: std::collections::HashMap::from([
+                ("listItem0".to_string(), "Alpha".to_string()),
+                ("listItem1".to_string(), "Beta".to_string()),
+                ("listItem2".to_string(), "Gamma".to_string()),
+            ]),
+            ..Default::default()
+        };
+
+        let edit = FormObject {
+            form_type: FormType::Edit,
+            name: "Edit1".to_string(),
+            text: "typed value".to_string(),
+            width: 7200,
+            height: 1700,
+            enabled: true,
+            ..Default::default()
+        };
+
+        for form in [checkbox, combo, edit] {
+            let mut paragraph = Paragraph::new_empty();
+            paragraph.controls.push(Control::Form(Box::new(form)));
+            paragraph.char_count = 9;
+            document.sections.push(Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+        }
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        assert_eq!(parsed.sections.len(), 3);
+
+        let checkbox_para = &parsed.sections[0].paragraphs[0];
+        let combo_para = &parsed.sections[1].paragraphs[0];
+        let edit_para = &parsed.sections[2].paragraphs[0];
+
+        let Control::Form(checkbox) = &checkbox_para.controls[0] else {
+            panic!("expected checkbox form");
+        };
+        assert_eq!(checkbox.form_type, FormType::CheckBox);
+        assert_eq!(checkbox.caption, "Agree");
+        assert_eq!(checkbox.value, 1);
+        assert_eq!(checkbox.width, 6519);
+
+        let Control::Form(combo) = &combo_para.controls[0] else {
+            panic!("expected combo form");
+        };
+        assert_eq!(combo.form_type, FormType::ComboBox);
+        assert_eq!(combo.text, "Beta");
+        assert_eq!(
+            collect_combobox_items(combo),
+            vec!["Alpha", "Beta", "Gamma"]
+        );
+
+        let Control::Form(edit) = &edit_para.controls[0] else {
+            panic!("expected edit form");
+        };
+        assert_eq!(edit.form_type, FormType::Edit);
+        assert_eq!(edit.text, "typed value");
+    }
+
+    #[test]
+    fn test_form_002_sample_roundtrip_becomes_supported() {
+        let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("rhwp-studio/public/samples/form-002.hwpx");
+        let bytes = std::fs::read(sample).expect("read form-002.hwpx");
+        let document = crate::parser::parse_document(&bytes).expect("parse form-002.hwpx");
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let saved = serialize_hwpx(&document).expect("serialize form-002.hwpx");
+        let reparsed = crate::parser::parse_document(&saved).expect("reparse form-002.hwpx");
+        let reparsed_report = analyze_hwpx_support(&reparsed);
+        assert!(
+            reparsed_report.is_supported(),
+            "{:?}",
+            reparsed_report.blockers
+        );
+    }
+
+    #[test]
+    fn test_supported_equation_ruby_and_hidden_comment_roundtrip() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let equation = Equation {
+            common: CommonObjAttr {
+                width: 4200,
+                height: 1800,
+                instance_id: 0x4100_0901,
+                ..Default::default()
+            },
+            script: "alpha over beta".to_string(),
+            font_size: 1000,
+            color: 0,
+            baseline: 0,
+            font_name: "함초롬바탕".to_string(),
+            version_info: "Equation Version 60".to_string(),
+            raw_ctrl_data: Vec::new(),
+        };
+
+        let ruby = Ruby {
+            ruby_text: "루비".to_string(),
+            alignment: 2,
+        };
+
+        let hidden_comment = HiddenComment {
+            paragraphs: vec![Paragraph {
+                text: "hidden".to_string(),
+                char_offsets: (0..6).collect(),
+                char_shapes: vec![CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: 0,
+                }],
+                para_shape_id: 0,
+                style_id: 0,
+                char_count: 7,
+                has_para_text: true,
+                ..Default::default()
+            }],
+        };
+
+        let mut paragraph = Paragraph {
+            text: "본문".to_string(),
+            char_offsets: (0..2).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 3,
+            has_para_text: true,
+            ..Default::default()
+        };
+        paragraph
+            .controls
+            .push(Control::Equation(Box::new(equation)));
+        paragraph.controls.push(Control::Ruby(ruby));
+        paragraph
+            .controls
+            .push(Control::HiddenComment(Box::new(hidden_comment)));
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        let para = &parsed.sections[0].paragraphs[0];
+
+        assert!(matches!(para.controls[0], Control::Equation(_)));
+        assert!(matches!(para.controls[1], Control::Ruby(_)));
+        assert!(matches!(para.controls[2], Control::HiddenComment(_)));
+
+        let Control::Equation(eq) = &para.controls[0] else {
+            panic!("expected equation");
+        };
+        assert_eq!(eq.script, "alpha over beta");
+
+        let Control::Ruby(ruby) = &para.controls[1] else {
+            panic!("expected ruby");
+        };
+        assert_eq!(ruby.ruby_text, "루비");
+
+        let Control::HiddenComment(comment) = &para.controls[2] else {
+            panic!("expected hidden comment");
+        };
+        assert_eq!(comment.paragraphs[0].text, "hidden");
+    }
+
+    #[test]
+    fn test_clean_snapshot_only_later_wave_controls_are_warnings_until_dirty() {
+        let mut document = Document::default();
+        let mut paragraph = Paragraph::new_empty();
+        paragraph.controls.push(Control::Field(Field {
+            field_type: FieldType::Hyperlink,
+            command: "https://example.com".to_string(),
+            ..Default::default()
+        }));
+        paragraph
+            .controls
+            .push(Control::CharOverlap(Default::default()));
+        paragraph
+            .controls
+            .push(Control::Equation(Box::new(Default::default())));
+        paragraph.controls.push(Control::Ruby(Default::default()));
+        paragraph
+            .controls
+            .push(Control::HiddenComment(Box::new(Default::default())));
+        paragraph
+            .controls
+            .push(Control::Unknown(Default::default()));
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let snapshot = HwpxPackageSnapshot {
+            entries: vec![crate::parser::hwpx::reader::HwpxPackageEntrySnapshot {
+                path: "Contents/section0.xml".to_string(),
+                bytes: b"<hp:section><hp:equation/><hp:dutmal/><hp:hiddenComment/></hp:section>"
+                    .to_vec(),
+                role: HwpxPackageEntryRole::Section(0),
+                replaceable: true,
+            }],
+        };
+
+        let clean_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[false]),
+                doc_info_dirty: false,
+            },
+        );
+        assert!(clean_report.is_supported(), "{:?}", clean_report.blockers);
+        for code in [
+            "hwpx-field-missing-range",
+            "hwpx-char-overlap",
+            "hwpx-unknown-control",
+        ] {
+            assert!(clean_report.issues.iter().any(|issue| {
+                issue.code == code && issue.severity == HwpxIssueSeverity::Warning
+            }));
+        }
+        for code in ["hwpx-equation", "hwpx-ruby", "hwpx-hidden-comment"] {
+            assert!(!clean_report.issues.iter().any(|issue| issue.code == code));
+        }
+
+        let dirty_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[true]),
+                doc_info_dirty: false,
+            },
+        );
+        assert!(!dirty_report.is_supported());
+        for code in [
+            "hwpx-field-missing-range",
+            "hwpx-char-overlap",
+            "hwpx-unknown-control",
+        ] {
+            assert!(dirty_report.issues.iter().any(|issue| {
+                issue.code == code && issue.severity == HwpxIssueSeverity::Blocker
+            }));
+        }
+        for code in ["hwpx-equation", "hwpx-ruby", "hwpx-hidden-comment"] {
+            assert!(!dirty_report.issues.iter().any(|issue| issue.code == code));
+        }
     }
 
     proptest! {
@@ -674,7 +1013,12 @@ impl HwpxSupportReport {
         let mut seen = BTreeSet::new();
         let mut deduped = Vec::new();
         for issue in &self.issues {
-            if seen.insert((issue.severity, issue.scope, issue.code, issue.message.clone())) {
+            if seen.insert((
+                issue.severity,
+                issue.scope,
+                issue.code,
+                issue.message.clone(),
+            )) {
                 deduped.push(issue.clone());
             }
         }
@@ -789,9 +1133,9 @@ fn classify_issue_severity(
     context: HwpxPreservationContext<'_>,
 ) -> HwpxIssueSeverity {
     match issue.code {
-        "hwpx-encrypted-document"
-        | "hwpx-distribution-document"
-        | "hwpx-extra-binary-streams" => HwpxIssueSeverity::Blocker,
+        "hwpx-encrypted-document" | "hwpx-distribution-document" | "hwpx-extra-binary-streams" => {
+            HwpxIssueSeverity::Blocker
+        }
         "hwpx-preview-regenerated" => HwpxIssueSeverity::Info,
         "hwpx-docinfo-extra-records" | "hwpx-image-bullet" => {
             if !context.doc_info_dirty {
@@ -805,7 +1149,14 @@ fn classify_issue_severity(
         | "hwpx-section-extra-records"
         | "hwpx-shape-curve"
         | "hwpx-shape-group-unsupported-child"
-        | "hwpx-shape-unsupported" => {
+        | "hwpx-shape-unsupported"
+        | "hwpx-field-missing-range"
+        | "hwpx-char-overlap"
+        | "hwpx-hyperlink"
+        | "hwpx-equation"
+        | "hwpx-ruby"
+        | "hwpx-hidden-comment"
+        | "hwpx-unknown-control" => {
             if issue_scope_is_clean(issue.scope, context.dirty_sections) {
                 HwpxIssueSeverity::Warning
             } else {
@@ -861,24 +1212,36 @@ fn append_snapshot_shape_issues(
 
 fn analyze_section(section: &Section, section_idx: usize, report: &mut HwpxSupportReport) {
     if section.section_def.page_border_fill.border_fill_id != 0 {
-        report.block(HwpxIssueScope::Section(section_idx), "hwpx-section-page-border-fill", format!(
-            "Section {} uses page border/fill settings that are not written to HWPX yet.",
-            section_idx
-        ));
+        report.block(
+            HwpxIssueScope::Section(section_idx),
+            "hwpx-section-page-border-fill",
+            format!(
+                "Section {} uses page border/fill settings that are not written to HWPX yet.",
+                section_idx
+            ),
+        );
     }
     if !section.section_def.master_pages.is_empty() {
-        report.block(HwpxIssueScope::Section(section_idx), "hwpx-section-master-pages", format!(
-            "Section {} uses master pages that are not written to HWPX yet.",
-            section_idx
-        ));
+        report.block(
+            HwpxIssueScope::Section(section_idx),
+            "hwpx-section-master-pages",
+            format!(
+                "Section {} uses master pages that are not written to HWPX yet.",
+                section_idx
+            ),
+        );
     }
     if !section.section_def.extra_page_border_fills.is_empty()
         || !section.section_def.extra_child_records.is_empty()
     {
-        report.block(HwpxIssueScope::Section(section_idx), "hwpx-section-extra-records", format!(
-            "Section {} carries extra section records that are not preserved in HWPX yet.",
-            section_idx
-        ));
+        report.block(
+            HwpxIssueScope::Section(section_idx),
+            "hwpx-section-extra-records",
+            format!(
+                "Section {} carries extra section records that are not preserved in HWPX yet.",
+                section_idx
+            ),
+        );
     }
 
     for (para_idx, para) in section.paragraphs.iter().enumerate() {
@@ -893,12 +1256,20 @@ fn analyze_paragraph(
     report: &mut HwpxSupportReport,
 ) {
     if para.numbering_restart.is_some() {
-        report.block(HwpxIssueScope::Section(section_idx), "hwpx-paragraph-numbering-restart", format!(
+        report.block(
+            HwpxIssueScope::Section(section_idx),
+            "hwpx-paragraph-numbering-restart",
+            format!(
             "Paragraph {} in section {} uses numbering restarts that are not written to HWPX yet.",
             para_idx, section_idx
-        ));
+        ),
+        );
     }
-    if para.text.chars().any(|ch| matches!(ch, '\u{0003}' | '\u{0004}')) {
+    if para
+        .text
+        .chars()
+        .any(|ch| matches!(ch, '\u{0003}' | '\u{0004}'))
+    {
         report.block(
             HwpxIssueScope::Section(section_idx),
             "hwpx-paragraph-stray-field-markers",
@@ -937,7 +1308,11 @@ fn shape_issue_code(shape: &ShapeObject) -> Option<&'static str> {
         | ShapeObject::Picture(_) => None,
         ShapeObject::Curve(_) => Some("hwpx-shape-curve"),
         ShapeObject::Group(group) => {
-            if group.children.iter().all(|child| shape_issue_code(child).is_none()) {
+            if group
+                .children
+                .iter()
+                .all(|child| shape_issue_code(child).is_none())
+            {
                 None
             } else {
                 Some("hwpx-shape-group-unsupported-child")
@@ -969,7 +1344,12 @@ fn analyze_shape_object(
 
     match shape {
         ShapeObject::Line(line) => {
-            analyze_caption_paragraphs(line.drawing.caption.as_ref(), section_idx, para_idx, report);
+            analyze_caption_paragraphs(
+                line.drawing.caption.as_ref(),
+                section_idx,
+                para_idx,
+                report,
+            );
             if let Some(text_box) = line.drawing.text_box.as_ref() {
                 for para in &text_box.paragraphs {
                     analyze_paragraph(para, section_idx, para_idx, report);
@@ -977,7 +1357,12 @@ fn analyze_shape_object(
             }
         }
         ShapeObject::Rectangle(rect) => {
-            analyze_caption_paragraphs(rect.drawing.caption.as_ref(), section_idx, para_idx, report);
+            analyze_caption_paragraphs(
+                rect.drawing.caption.as_ref(),
+                section_idx,
+                para_idx,
+                report,
+            );
             if let Some(text_box) = rect.drawing.text_box.as_ref() {
                 for para in &text_box.paragraphs {
                     analyze_paragraph(para, section_idx, para_idx, report);
@@ -985,7 +1370,12 @@ fn analyze_shape_object(
             }
         }
         ShapeObject::Ellipse(ellipse) => {
-            analyze_caption_paragraphs(ellipse.drawing.caption.as_ref(), section_idx, para_idx, report);
+            analyze_caption_paragraphs(
+                ellipse.drawing.caption.as_ref(),
+                section_idx,
+                para_idx,
+                report,
+            );
             if let Some(text_box) = ellipse.drawing.text_box.as_ref() {
                 for para in &text_box.paragraphs {
                     analyze_paragraph(para, section_idx, para_idx, report);
@@ -1001,7 +1391,12 @@ fn analyze_shape_object(
             }
         }
         ShapeObject::Polygon(polygon) => {
-            analyze_caption_paragraphs(polygon.drawing.caption.as_ref(), section_idx, para_idx, report);
+            analyze_caption_paragraphs(
+                polygon.drawing.caption.as_ref(),
+                section_idx,
+                para_idx,
+                report,
+            );
             if let Some(text_box) = polygon.drawing.text_box.as_ref() {
                 for para in &text_box.paragraphs {
                     analyze_paragraph(para, section_idx, para_idx, report);
@@ -1090,27 +1485,15 @@ fn analyze_control(
                 );
             }
         }
-        Control::HiddenComment(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-hidden-comment", format!(
-            "Paragraph {} in section {} uses hidden comments that are not written to HWPX yet.",
-            para_idx, section_idx
-        )),
+        Control::HiddenComment(_) => {}
         Control::Shape(shape) => analyze_shape_object(shape, section_idx, para_idx, report),
-        Control::Equation(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-equation", format!(
-            "Paragraph {} in section {} uses equations that are not written to HWPX yet.",
-            para_idx, section_idx
-        )),
-        Control::Form(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-form", format!(
-            "Paragraph {} in section {} uses form controls that are not written to HWPX yet.",
-            para_idx, section_idx
-        )),
+        Control::Equation(_) => {}
+        Control::Form(_) => {}
         Control::Hyperlink(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-hyperlink", format!(
             "Paragraph {} in section {} uses hyperlink controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Ruby(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-ruby", format!(
-            "Paragraph {} in section {} uses ruby annotations that are not written to HWPX yet.",
-            para_idx, section_idx
-        )),
+        Control::Ruby(_) => {}
         Control::CharOverlap(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-char-overlap", format!(
             "Paragraph {} in section {} uses character-overlap controls that are not written to HWPX yet.",
             para_idx, section_idx
@@ -1216,10 +1599,7 @@ pub fn serialize_hwpx_with_context(
         .map(|cursor| cursor.into_inner())
 }
 
-fn planned_section_paths(
-    doc: &Document,
-    snapshot: Option<&HwpxPackageSnapshot>,
-) -> Vec<String> {
+fn planned_section_paths(doc: &Document, snapshot: Option<&HwpxPackageSnapshot>) -> Vec<String> {
     let existing_paths = snapshot
         .map(HwpxPackageSnapshot::section_paths)
         .unwrap_or_default();
@@ -1235,10 +1615,7 @@ fn planned_section_paths(
         .collect()
 }
 
-fn planned_bindata_paths(
-    doc: &Document,
-    snapshot: Option<&HwpxPackageSnapshot>,
-) -> Vec<String> {
+fn planned_bindata_paths(doc: &Document, snapshot: Option<&HwpxPackageSnapshot>) -> Vec<String> {
     let existing_paths = snapshot
         .map(HwpxPackageSnapshot::bindata_paths)
         .unwrap_or_default();
@@ -1339,12 +1716,14 @@ fn should_drop_snapshot_entry(
     bindata_paths: &[String],
 ) -> bool {
     match entry.role {
-        HwpxPackageEntryRole::Section(index) => {
-            section_paths.get(index).map(|path| path != &entry.path).unwrap_or(true)
-        }
-        HwpxPackageEntryRole::BinData(index) => {
-            bindata_paths.get(index).map(|path| path != &entry.path).unwrap_or(true)
-        }
+        HwpxPackageEntryRole::Section(index) => section_paths
+            .get(index)
+            .map(|path| path != &entry.path)
+            .unwrap_or(true),
+        HwpxPackageEntryRole::BinData(index) => bindata_paths
+            .get(index)
+            .map(|path| path != &entry.path)
+            .unwrap_or(true),
         _ => false,
     }
 }
@@ -1363,14 +1742,20 @@ fn write_zip_entry_bytes(
         .map_err(|e| SerializeError::CfbError(e.to_string()))
 }
 
-fn serialize_content_hpf(doc: &Document, section_paths: &[String], bindata_paths: &[String]) -> String {
+fn serialize_content_hpf(
+    doc: &Document,
+    section_paths: &[String],
+    bindata_paths: &[String],
+) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(
         r#"<opf:package xmlns:opf="http://www.idpf.org/2007/opf/" version="3.0" unique-identifier="rhwp-doc" id="rhwp-doc">"#,
     );
     xml.push_str(r#"<opf:manifest>"#);
-    xml.push_str(r#"<opf:item id="header" href="Contents/header.xml" media-type="application/xml"/>"#);
+    xml.push_str(
+        r#"<opf:item id="header" href="Contents/header.xml" media-type="application/xml"/>"#,
+    );
 
     for (index, path) in bindata_paths.iter().enumerate() {
         let extension = path
@@ -1384,7 +1769,11 @@ fn serialize_content_hpf(doc: &Document, section_paths: &[String], bindata_paths
                     .get(index)
                     .and_then(|info| info.extension.clone())
             })
-            .or_else(|| doc.bin_data_content.get(index).map(|content| content.extension.clone()))
+            .or_else(|| {
+                doc.bin_data_content
+                    .get(index)
+                    .map(|content| content.extension.clone())
+            })
             .unwrap_or_else(|| "dat".to_string());
         let media_type = media_type_for_extension(&extension);
         xml.push_str(&format!(
@@ -1430,16 +1819,15 @@ fn serialize_header_xml(doc: &Document) -> String {
     ));
 
     let lang_names = [
-        "HANGUL",
-        "LATIN",
-        "HANJA",
-        "JAPANESE",
-        "OTHER",
-        "SYMBOL",
-        "USER",
+        "HANGUL", "LATIN", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER",
     ];
     for (lang_idx, lang_name) in lang_names.iter().enumerate() {
-        let fonts = doc.doc_info.font_faces.get(lang_idx).cloned().unwrap_or_default();
+        let fonts = doc
+            .doc_info
+            .font_faces
+            .get(lang_idx)
+            .cloned()
+            .unwrap_or_default();
         if fonts.is_empty() {
             continue;
         }
@@ -1626,7 +2014,10 @@ fn serialize_tab_def(tab_def: &TabDef) -> String {
 
 fn serialize_numbering(numbering: &Numbering) -> String {
     let mut xml = String::new();
-    xml.push_str(&format!(r#"<hh:numbering start="{}">"#, numbering.start_number));
+    xml.push_str(&format!(
+        r#"<hh:numbering start="{}">"#,
+        numbering.start_number
+    ));
     for level in 0..7 {
         xml.push_str(&format!(
             r#"<hh:paraHead level="{}" start="{}" text="{}" numFormat="{}" charPrIDRef="{}"/>"#,
@@ -1642,7 +2033,11 @@ fn serialize_numbering(numbering: &Numbering) -> String {
 }
 
 fn serialize_bullet(bullet: &Bullet, id: usize) -> String {
-    let bullet_char = if bullet.bullet_char == '\0' { '•' } else { bullet.bullet_char };
+    let bullet_char = if bullet.bullet_char == '\0' {
+        '•'
+    } else {
+        bullet.bullet_char
+    };
     let check_bullet_char = if bullet.check_bullet_char == '\0' {
         bullet_char
     } else {
@@ -1670,10 +2065,19 @@ fn serialize_bullet(bullet: &Bullet, id: usize) -> String {
 fn serialize_border_fill(border_fill: &BorderFill) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<hh:borderFill>"#);
-    xml.push_str(&serialize_border_line("leftBorder", &border_fill.borders[0]));
-    xml.push_str(&serialize_border_line("rightBorder", &border_fill.borders[1]));
+    xml.push_str(&serialize_border_line(
+        "leftBorder",
+        &border_fill.borders[0],
+    ));
+    xml.push_str(&serialize_border_line(
+        "rightBorder",
+        &border_fill.borders[1],
+    ));
     xml.push_str(&serialize_border_line("topBorder", &border_fill.borders[2]));
-    xml.push_str(&serialize_border_line("bottomBorder", &border_fill.borders[3]));
+    xml.push_str(&serialize_border_line(
+        "bottomBorder",
+        &border_fill.borders[3],
+    ));
 
     if border_fill.diagonal.width > 0 || border_fill.diagonal.color != 0 {
         xml.push_str(&format!(
@@ -1758,7 +2162,10 @@ fn serialize_para_shape(para_shape: &ParaShape) -> String {
         r#"<hh:align horizontal="{}"/>"#,
         alignment_to_xml(para_shape.alignment),
     ));
-    if para_shape.head_type != HeadType::None || para_shape.numbering_id != 0 || para_shape.para_level != 0 {
+    if para_shape.head_type != HeadType::None
+        || para_shape.numbering_id != 0
+        || para_shape.para_level != 0
+    {
         xml.push_str(&format!(
             r#"<hh:heading type="{}" idRef="{}" level="{}"/>"#,
             head_type_to_xml(para_shape.head_type),
@@ -1893,11 +2300,20 @@ fn serialize_paragraph_xml(
     let mut empty_field_ends: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     let mut field_boundaries = BTreeSet::new();
     for (range_idx, range) in para.field_ranges.iter().enumerate() {
-        field_starts.entry(range.start_char_idx).or_default().push(range_idx);
+        field_starts
+            .entry(range.start_char_idx)
+            .or_default()
+            .push(range_idx);
         if range.start_char_idx == range.end_char_idx {
-            empty_field_ends.entry(range.end_char_idx).or_default().push(range_idx);
+            empty_field_ends
+                .entry(range.end_char_idx)
+                .or_default()
+                .push(range_idx);
         } else {
-            field_ends.entry(range.end_char_idx).or_default().push(range_idx);
+            field_ends
+                .entry(range.end_char_idx)
+                .or_default()
+                .push(range_idx);
         }
         field_boundaries.insert(range.start_char_idx);
         field_boundaries.insert(range.end_char_idx);
@@ -1906,7 +2322,8 @@ fn serialize_paragraph_xml(
         ranges.sort_by_key(|range_idx| para.field_ranges[*range_idx].control_idx);
     }
     for ranges in field_ends.values_mut() {
-        ranges.sort_by_key(|range_idx| std::cmp::Reverse(para.field_ranges[*range_idx].control_idx));
+        ranges
+            .sort_by_key(|range_idx| std::cmp::Reverse(para.field_ranges[*range_idx].control_idx));
     }
     for ranges in empty_field_ends.values_mut() {
         ranges.sort_by_key(|range_idx| para.field_ranges[*range_idx].control_idx);
@@ -1970,10 +2387,7 @@ fn serialize_paragraph_xml(
     Ok(xml)
 }
 
-fn serialize_section_def_xml(
-    section_def: &SectionDef,
-    column_def: Option<&ColumnDef>,
-) -> String {
+fn serialize_section_def_xml(section_def: &SectionDef, column_def: Option<&ColumnDef>) -> String {
     let mut xml = String::new();
     xml.push_str(&format!(
         r#"<hp:secPr textDirection="{}" tabStop="{}">"#,
@@ -2074,7 +2488,10 @@ fn compute_skipped_text_indices(
 
 fn serialize_run_xml(text: &[char], char_shape_id: u32) -> String {
     let mut xml = String::new();
-    xml.push_str(&format!(r#"<hp:run charPrIDRef="{}"><hp:t>"#, char_shape_id));
+    xml.push_str(&format!(
+        r#"<hp:run charPrIDRef="{}"><hp:t>"#,
+        char_shape_id
+    ));
     let mut plain = String::new();
     for ch in text {
         match ch {
@@ -2156,19 +2573,11 @@ fn serialize_control_xml(control: &Control) -> Result<String, SerializeError> {
         Control::Shape(shape) => serialize_shape_xml(shape, false),
         Control::Header(header) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
-            serialize_header_footer_control(
-                "header",
-                header.apply_to,
-                &header.paragraphs,
-            )?
+            serialize_header_footer_control("header", header.apply_to, &header.paragraphs,)?
         )),
         Control::Footer(footer) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
-            serialize_header_footer_control(
-                "footer",
-                footer.apply_to,
-                &footer.paragraphs,
-            )?
+            serialize_header_footer_control("footer", footer.apply_to, &footer.paragraphs,)?
         )),
         Control::Footnote(note) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
@@ -2198,6 +2607,13 @@ fn serialize_control_xml(control: &Control) -> Result<String, SerializeError> {
             r#"<hp:ctrl>{}</hp:ctrl>"#,
             serialize_page_hide_control(page_hide)
         )),
+        Control::HiddenComment(comment) => Ok(format!(
+            r#"<hp:ctrl>{}</hp:ctrl>"#,
+            serialize_hidden_comment_control(comment)?
+        )),
+        Control::Equation(eq) => Ok(serialize_equation_xml(eq)),
+        Control::Form(form) => Ok(serialize_form_control(form)),
+        Control::Ruby(ruby) => Ok(serialize_ruby_xml(ruby)),
         other => Err(SerializeError::CfbError(format!(
             "Unsupported control reached HWPX serializer: {:?}",
             other
@@ -2209,10 +2625,9 @@ fn serialize_field_begin_for_range(
     para: &Paragraph,
     range_idx: usize,
 ) -> Result<String, SerializeError> {
-    let range = para
-        .field_ranges
-        .get(range_idx)
-        .ok_or_else(|| SerializeError::CfbError("Missing field range during HWPX save".to_string()))?;
+    let range = para.field_ranges.get(range_idx).ok_or_else(|| {
+        SerializeError::CfbError("Missing field range during HWPX save".to_string())
+    })?;
     let field = match para.controls.get(range.control_idx) {
         Some(Control::Field(field)) => field,
         _ => {
@@ -2233,10 +2648,9 @@ fn serialize_field_end_for_range(
     para: &Paragraph,
     range_idx: usize,
 ) -> Result<String, SerializeError> {
-    let range = para
-        .field_ranges
-        .get(range_idx)
-        .ok_or_else(|| SerializeError::CfbError("Missing field range during HWPX save".to_string()))?;
+    let range = para.field_ranges.get(range_idx).ok_or_else(|| {
+        SerializeError::CfbError("Missing field range during HWPX save".to_string())
+    })?;
     let field = match para.controls.get(range.control_idx) {
         Some(Control::Field(field)) => field,
         _ => {
@@ -2265,14 +2679,13 @@ fn serialize_field_begin_control(field: &Field, control_idx: usize) -> String {
         })
         .unwrap_or_default();
 
-    let command = if field.command.is_empty()
-        && field.field_type == FieldType::ClickHere
-        && !name.is_empty()
-    {
-        Field::build_clickhere_command("", "", name)
-    } else {
-        field.command.clone()
-    };
+    let command =
+        if field.command.is_empty() && field.field_type == FieldType::ClickHere && !name.is_empty()
+        {
+            Field::build_clickhere_command("", "", name)
+        } else {
+            field.command.clone()
+        };
 
     let mut parameters = Vec::new();
     parameters.push(format!(
@@ -2331,8 +2744,7 @@ fn serialize_field_end_control(field: &Field, control_idx: usize) -> String {
     let (ctrl_id, field_id) = resolved_field_ids(field, control_idx);
     format!(
         r#"<hp:fieldEnd beginIDRef="{}" fieldid="{}"/>"#,
-        ctrl_id,
-        field_id,
+        ctrl_id, field_id,
     )
 }
 
@@ -2367,8 +2779,7 @@ fn serialize_table_xml(table: &Table) -> Result<String, SerializeError> {
     ));
     xml.push_str(&format!(
         r#"<hp:sz width="{}" height="{}"/>"#,
-        table.common.width,
-        table.common.height,
+        table.common.width, table.common.height,
     ));
     xml.push_str(&serialize_pos_xml(&table.common));
     xml.push_str(&format!(
@@ -2380,10 +2791,7 @@ fn serialize_table_xml(table: &Table) -> Result<String, SerializeError> {
     ));
     xml.push_str(&format!(
         r#"<hp:inMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        table.padding.left,
-        table.padding.right,
-        table.padding.top,
-        table.padding.bottom,
+        table.padding.left, table.padding.right, table.padding.top, table.padding.bottom,
     ));
     for zone in &table.zones {
         xml.push_str(&format!(
@@ -2434,17 +2842,18 @@ fn serialize_table_cell_xml(cell: &Cell) -> Result<String, SerializeError> {
     ));
     xml.push_str(&format!(
         r#"<hp:cellMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        cell.padding.left,
-        cell.padding.right,
-        cell.padding.top,
-        cell.padding.bottom,
+        cell.padding.left, cell.padding.right, cell.padding.top, cell.padding.bottom,
     ));
     xml.push_str(&format!(
         r#"<hp:subList vertAlign="{}">"#,
         vertical_align_to_xml(cell.vertical_align),
     ));
     if cell.paragraphs.is_empty() {
-        xml.push_str(&serialize_paragraph_xml(&Paragraph::new_empty(), None, None)?);
+        xml.push_str(&serialize_paragraph_xml(
+            &Paragraph::new_empty(),
+            None,
+            None,
+        )?);
     } else {
         for para in &cell.paragraphs {
             xml.push_str(&serialize_paragraph_xml(para, None, None)?);
@@ -2487,17 +2896,11 @@ fn serialize_picture_xml_with_context(
     ));
     xml.push_str(&format!(
         r#"<hp:imgClip left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        picture.crop.left,
-        picture.crop.right,
-        picture.crop.top,
-        picture.crop.bottom,
+        picture.crop.left, picture.crop.right, picture.crop.top, picture.crop.bottom,
     ));
     xml.push_str(&format!(
         r#"<hp:inMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        picture.padding.left,
-        picture.padding.right,
-        picture.padding.top,
-        picture.padding.bottom,
+        picture.padding.left, picture.padding.right, picture.padding.top, picture.padding.bottom,
     ));
     xml.push_str(&format!(
         r#"<hp:img binaryItemIDRef="image{}" bright="{}" contrast="{}" effect="{}"/>"#,
@@ -2510,9 +2913,14 @@ fn serialize_picture_xml_with_context(
     Ok(xml)
 }
 
-fn serialize_shape_xml(shape: &ShapeObject, nested_in_group: bool) -> Result<String, SerializeError> {
+fn serialize_shape_xml(
+    shape: &ShapeObject,
+    nested_in_group: bool,
+) -> Result<String, SerializeError> {
     match shape {
-        ShapeObject::Picture(picture) => serialize_picture_xml_with_context(picture, nested_in_group),
+        ShapeObject::Picture(picture) => {
+            serialize_picture_xml_with_context(picture, nested_in_group)
+        }
         ShapeObject::Group(group) => {
             let mut xml = String::new();
             xml.push_str(&format!(
@@ -2645,12 +3053,32 @@ fn serialize_shape_xml(shape: &ShapeObject, nested_in_group: bool) -> Result<Str
                 ellipse.drawing.shadow_offset_y,
                 ellipse.drawing.shadow_alpha,
             ));
-            xml.push_str(&serialize_point_xml("center", ellipse.center.x, ellipse.center.y));
-            xml.push_str(&serialize_point_xml("ax1", ellipse.axis1.x, ellipse.axis1.y));
-            xml.push_str(&serialize_point_xml("ax2", ellipse.axis2.x, ellipse.axis2.y));
-            xml.push_str(&serialize_point_xml("start1", ellipse.start1.x, ellipse.start1.y));
+            xml.push_str(&serialize_point_xml(
+                "center",
+                ellipse.center.x,
+                ellipse.center.y,
+            ));
+            xml.push_str(&serialize_point_xml(
+                "ax1",
+                ellipse.axis1.x,
+                ellipse.axis1.y,
+            ));
+            xml.push_str(&serialize_point_xml(
+                "ax2",
+                ellipse.axis2.x,
+                ellipse.axis2.y,
+            ));
+            xml.push_str(&serialize_point_xml(
+                "start1",
+                ellipse.start1.x,
+                ellipse.start1.y,
+            ));
             xml.push_str(&serialize_point_xml("end1", ellipse.end1.x, ellipse.end1.y));
-            xml.push_str(&serialize_point_xml("start2", ellipse.start2.x, ellipse.start2.y));
+            xml.push_str(&serialize_point_xml(
+                "start2",
+                ellipse.start2.x,
+                ellipse.start2.y,
+            ));
             xml.push_str(&serialize_point_xml("end2", ellipse.end2.x, ellipse.end2.y));
             xml.push_str(r#"</hp:ellipse>"#);
             Ok(xml)
@@ -2732,7 +3160,14 @@ fn start_basic_shape_xml(
     shape_attr: &crate::model::shape::ShapeComponentAttr,
     nested_in_group: bool,
 ) -> Result<String, SerializeError> {
-    start_basic_shape_xml_with_extra_attrs(tag_name, common, caption, shape_attr, nested_in_group, "")
+    start_basic_shape_xml_with_extra_attrs(
+        tag_name,
+        common,
+        caption,
+        shape_attr,
+        nested_in_group,
+        "",
+    )
 }
 
 fn start_basic_shape_xml_with_extra_attrs(
@@ -2777,7 +3212,11 @@ fn resolved_instance_id(common: &CommonObjAttr) -> u32 {
         ^ common.vertical_offset
         ^ common.horizontal_offset;
     let id = (seed | 0x4000_0000).max(1);
-    if id == 0 { 0x4000_0001 } else { id }
+    if id == 0 {
+        0x4000_0001
+    } else {
+        id
+    }
 }
 
 fn serialize_size_xml(common: &CommonObjAttr) -> String {
@@ -2806,10 +3245,7 @@ fn serialize_pos_xml(common: &CommonObjAttr) -> String {
 fn serialize_out_margin_xml(common: &CommonObjAttr) -> String {
     format!(
         r#"<hp:outMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        common.margin.left,
-        common.margin.right,
-        common.margin.top,
-        common.margin.bottom,
+        common.margin.left, common.margin.right, common.margin.top, common.margin.bottom,
     )
 }
 
@@ -2825,8 +3261,7 @@ fn serialize_shape_component_xml(
     ));
     xml.push_str(&format!(
         r#"<hp:orgSz width="{}" height="{}"/>"#,
-        shape_attr.original_width,
-        shape_attr.original_height,
+        shape_attr.original_width, shape_attr.original_height,
     ));
     xml.push_str(&format!(
         r#"<hp:curSz width="{}" height="{}"/>"#,
@@ -2850,8 +3285,16 @@ fn serialize_shape_component_xml(
 }
 
 fn serialize_rendering_info_xml(shape_attr: &crate::model::shape::ShapeComponentAttr) -> String {
-    let a = if shape_attr.render_sx == 0.0 { 1.0 } else { shape_attr.render_sx };
-    let d = if shape_attr.render_sy == 0.0 { 1.0 } else { shape_attr.render_sy };
+    let a = if shape_attr.render_sx == 0.0 {
+        1.0
+    } else {
+        shape_attr.render_sx
+    };
+    let d = if shape_attr.render_sy == 0.0 {
+        1.0
+    } else {
+        shape_attr.render_sy
+    };
     format!(
         r#"<hp:renderingInfo><hc:transMatrix e1="{}" e2="{}" e3="{}" e4="{}" e5="{}" e6="{}"/></hp:renderingInfo>"#,
         format_matrix_value(a),
@@ -2908,10 +3351,7 @@ fn serialize_fill_brush_xml(fill: &crate::model::style::Fill) -> Option<String> 
             let gradient = fill.gradient.as_ref()?;
             Some(format!(
                 r#"<hc:fillBrush><hc:gradation type="{}" angle="{}" centerX="{}" centerY="{}"/></hc:fillBrush>"#,
-                gradient.gradient_type,
-                gradient.angle,
-                gradient.center_x,
-                gradient.center_y,
+                gradient.gradient_type, gradient.angle, gradient.center_x, gradient.center_y,
             ))
         }
         FillType::Image => {
@@ -2924,7 +3364,9 @@ fn serialize_fill_brush_xml(fill: &crate::model::style::Fill) -> Option<String> 
     }
 }
 
-fn serialize_draw_text_xml(text_box: &crate::model::shape::TextBox) -> Result<String, SerializeError> {
+fn serialize_draw_text_xml(
+    text_box: &crate::model::shape::TextBox,
+) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
         r#"<hp:drawText lastWidth="{}" name="" editable="0">"#,
@@ -2935,7 +3377,11 @@ fn serialize_draw_text_xml(text_box: &crate::model::shape::TextBox) -> Result<St
         vertical_align_to_xml(text_box.vertical_align),
     ));
     if text_box.paragraphs.is_empty() {
-        xml.push_str(&serialize_paragraph_xml(&Paragraph::new_empty(), None, None)?);
+        xml.push_str(&serialize_paragraph_xml(
+            &Paragraph::new_empty(),
+            None,
+            None,
+        )?);
     } else {
         for para in &text_box.paragraphs {
             xml.push_str(&serialize_paragraph_xml(para, None, None)?);
@@ -2944,10 +3390,7 @@ fn serialize_draw_text_xml(text_box: &crate::model::shape::TextBox) -> Result<St
     xml.push_str(r#"</hp:subList>"#);
     xml.push_str(&format!(
         r#"<hp:textMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        text_box.margin_left,
-        text_box.margin_right,
-        text_box.margin_top,
-        text_box.margin_bottom,
+        text_box.margin_left, text_box.margin_right, text_box.margin_top, text_box.margin_bottom,
     ));
     xml.push_str(r#"</hp:drawText>"#);
     Ok(xml)
@@ -2985,7 +3428,11 @@ fn serialize_caption_xml(caption: &Caption) -> Result<String, SerializeError> {
         caption_vert_align_to_xml(caption.vert_align),
     ));
     if caption.paragraphs.is_empty() {
-        xml.push_str(&serialize_paragraph_xml(&Paragraph::new_empty(), None, None)?);
+        xml.push_str(&serialize_paragraph_xml(
+            &Paragraph::new_empty(),
+            None,
+            None,
+        )?);
     } else {
         for para in &caption.paragraphs {
             xml.push_str(&serialize_paragraph_xml(para, None, None)?);
@@ -3029,6 +3476,16 @@ fn serialize_note_control(
     }
     xml.push_str(r#"</hp:subList>"#);
     xml.push_str(&format!(r#"</hp:{}>"#, tag_name));
+    Ok(xml)
+}
+
+fn serialize_hidden_comment_control(comment: &HiddenComment) -> Result<String, SerializeError> {
+    let mut xml = String::new();
+    xml.push_str(r#"<hp:hiddenComment><hp:subList>"#);
+    for para in &comment.paragraphs {
+        xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+    }
+    xml.push_str(r#"</hp:subList></hp:hiddenComment>"#);
     Ok(xml)
 }
 
@@ -3090,6 +3547,213 @@ fn serialize_bookmark_control(bookmark: &Bookmark) -> String {
     )
 }
 
+fn serialize_equation_xml(equation: &Equation) -> String {
+    let mut xml = String::new();
+    xml.push_str(&format!(
+        r#"<hp:equation zOrder="{}" textWrap="{}" instid="{}" groupLevel="0" version="{}" baseLine="{}" textColor="{}" baseUnit="{}" font="{}">"#,
+        equation.common.z_order,
+        text_wrap_to_xml(equation.common.text_wrap),
+        resolved_instance_id(&equation.common),
+        xml_escape_attr(&equation.version_info),
+        equation.baseline,
+        color_to_hex(equation.color),
+        equation.font_size,
+        xml_escape_attr(&equation.font_name),
+    ));
+    xml.push_str(&serialize_size_xml(&equation.common));
+    xml.push_str(&serialize_pos_xml(&equation.common));
+    xml.push_str(&serialize_out_margin_xml(&equation.common));
+    xml.push_str("<hp:script>");
+    xml.push_str(&xml_escape_text(&equation.script));
+    xml.push_str("</hp:script></hp:equation>");
+    xml
+}
+
+fn serialize_form_control(form: &FormObject) -> String {
+    let tag = match form.form_type {
+        FormType::PushButton => "btn",
+        FormType::CheckBox => "checkBtn",
+        FormType::RadioButton => "radioBtn",
+        FormType::ComboBox => "comboBox",
+        FormType::Edit => "edit",
+    };
+
+    let mut attrs = Vec::new();
+    attrs.push(("name".to_string(), form.name.clone()));
+    if matches!(
+        form.form_type,
+        FormType::PushButton | FormType::CheckBox | FormType::RadioButton
+    ) {
+        attrs.push(("caption".to_string(), form.caption.clone()));
+    }
+    attrs.push(("foreColor".to_string(), color_to_hex(form.fore_color)));
+    attrs.push(("backColor".to_string(), color_to_hex(form.back_color)));
+    attrs.push((
+        "enabled".to_string(),
+        bool_to_attr(form.enabled).to_string(),
+    ));
+
+    match form.form_type {
+        FormType::CheckBox | FormType::RadioButton => attrs.push((
+            "value".to_string(),
+            if form.value == 0 {
+                "UNCHECKED".to_string()
+            } else {
+                "CHECKED".to_string()
+            },
+        )),
+        FormType::ComboBox => attrs.push(("selectedValue".to_string(), form.text.clone())),
+        _ => {}
+    }
+
+    append_form_properties(&mut attrs, form, "");
+
+    let mut xml = String::new();
+    xml.push_str(&format!("<hp:{}{}>", tag, serialize_xml_attrs(&attrs)));
+
+    let form_char_pr_attrs = collect_form_prefixed_properties(form, "formCharPr.");
+    if form_char_pr_attrs.is_empty() {
+        xml.push_str(
+            r#"<hp:formCharPr charPrIDRef="0" followContext="0" autoSz="0" wordWrap="0"/>"#,
+        );
+    } else {
+        xml.push_str(&format!(
+            "<hp:formCharPr{}/>",
+            serialize_xml_attrs(&form_char_pr_attrs)
+        ));
+    }
+
+    let mut size_attrs = vec![
+        ("width".to_string(), form.width.to_string()),
+        ("height".to_string(), form.height.to_string()),
+    ];
+    append_form_prefixed_properties(&mut size_attrs, form, "sz.");
+    xml.push_str(&format!("<hp:sz{}/>", serialize_xml_attrs(&size_attrs)));
+
+    let mut pos_attrs = Vec::new();
+    append_form_prefixed_properties(&mut pos_attrs, form, "pos.");
+    if pos_attrs.is_empty() {
+        pos_attrs = vec![
+            ("treatAsChar".to_string(), "1".to_string()),
+            ("affectLSpacing".to_string(), "0".to_string()),
+            ("flowWithText".to_string(), "1".to_string()),
+            ("allowOverlap".to_string(), "1".to_string()),
+            ("holdAnchorAndSO".to_string(), "0".to_string()),
+            ("vertRelTo".to_string(), "PARA".to_string()),
+            ("horzRelTo".to_string(), "PARA".to_string()),
+            ("vertAlign".to_string(), "TOP".to_string()),
+            ("horzAlign".to_string(), "LEFT".to_string()),
+            ("vertOffset".to_string(), "0".to_string()),
+            ("horzOffset".to_string(), "0".to_string()),
+        ];
+    }
+    xml.push_str(&format!("<hp:pos{}/>", serialize_xml_attrs(&pos_attrs)));
+
+    let mut margin_attrs = Vec::new();
+    append_form_prefixed_properties(&mut margin_attrs, form, "outMargin.");
+    if margin_attrs.is_empty() {
+        margin_attrs = vec![
+            ("left".to_string(), "0".to_string()),
+            ("right".to_string(), "0".to_string()),
+            ("top".to_string(), "0".to_string()),
+            ("bottom".to_string(), "0".to_string()),
+        ];
+    }
+    xml.push_str(&format!(
+        "<hp:outMargin{}/>",
+        serialize_xml_attrs(&margin_attrs)
+    ));
+
+    if form.form_type == FormType::ComboBox {
+        for value in collect_combobox_items(form) {
+            xml.push_str(&format!(
+                r#"<hp:listItem value="{}"/>"#,
+                xml_escape_attr(&value)
+            ));
+        }
+    }
+
+    if form.form_type == FormType::Edit {
+        xml.push_str("<hp:text>");
+        xml.push_str(&xml_escape_text(&form.text));
+        xml.push_str("</hp:text>");
+    }
+
+    xml.push_str(&format!("</hp:{}>", tag));
+    xml
+}
+
+fn serialize_xml_attrs(attrs: &[(String, String)]) -> String {
+    if attrs.is_empty() {
+        return String::new();
+    }
+
+    let mut xml = String::new();
+    for (key, value) in attrs {
+        xml.push(' ');
+        xml.push_str(key);
+        xml.push_str("=\"");
+        xml.push_str(&xml_escape_attr(value));
+        xml.push('"');
+    }
+    xml
+}
+
+fn append_form_properties(attrs: &mut Vec<(String, String)>, form: &FormObject, prefix: &str) {
+    let mut extras = form
+        .properties
+        .iter()
+        .filter(|(key, _)| !key.starts_with("listItem") && !key.contains('.'))
+        .map(|(key, value)| (format!("{}{}", prefix, key), value.clone()))
+        .collect::<Vec<_>>();
+    extras.sort_by(|a, b| a.0.cmp(&b.0));
+    attrs.extend(extras);
+}
+
+fn append_form_prefixed_properties(
+    attrs: &mut Vec<(String, String)>,
+    form: &FormObject,
+    prefix: &str,
+) {
+    let mut extras = collect_form_prefixed_properties(form, prefix);
+    attrs.append(&mut extras);
+}
+
+fn collect_form_prefixed_properties(form: &FormObject, prefix: &str) -> Vec<(String, String)> {
+    let mut extras = form
+        .properties
+        .iter()
+        .filter_map(|(key, value)| {
+            key.strip_prefix(prefix)
+                .map(|stripped| (stripped.to_string(), value.clone()))
+        })
+        .collect::<Vec<_>>();
+    extras.sort_by(|a, b| a.0.cmp(&b.0));
+    extras
+}
+
+fn collect_combobox_items(form: &FormObject) -> Vec<String> {
+    let mut items = form
+        .properties
+        .iter()
+        .filter_map(|(key, value)| {
+            key.strip_prefix("listItem")
+                .and_then(|suffix| suffix.parse::<usize>().ok())
+                .map(|index| (index, value.clone()))
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|(index, _)| *index);
+    items.into_iter().map(|(_, value)| value).collect()
+}
+
+fn serialize_ruby_xml(ruby: &Ruby) -> String {
+    format!(
+        r#"<hp:dutmal posType="TOP" align="{}"><hp:mainText></hp:mainText><hp:subText>{}</hp:subText></hp:dutmal>"#,
+        ruby_alignment_to_xml(ruby.alignment),
+        xml_escape_text(&ruby.ruby_text),
+    )
+}
+
 fn char_shape_id_at(para: &Paragraph, char_idx: usize) -> u32 {
     if para.char_shapes.is_empty() {
         return 0;
@@ -3143,7 +3807,11 @@ fn color_to_hex(color: u32) -> String {
 }
 
 fn bool_to_attr(value: bool) -> &'static str {
-    if value { "1" } else { "0" }
+    if value {
+        "1"
+    } else {
+        "0"
+    }
 }
 
 fn alpha_to_decimal(alpha: u8) -> String {
@@ -3420,6 +4088,15 @@ fn caption_vert_align_to_xml(align: CaptionVertAlign) -> &'static str {
         CaptionVertAlign::Top => "TOP",
         CaptionVertAlign::Center => "CENTER",
         CaptionVertAlign::Bottom => "BOTTOM",
+    }
+}
+
+fn ruby_alignment_to_xml(alignment: u8) -> &'static str {
+    match alignment {
+        0 => "LEFT",
+        1 => "RIGHT",
+        2 => "CENTER",
+        _ => "CENTER",
     }
 }
 

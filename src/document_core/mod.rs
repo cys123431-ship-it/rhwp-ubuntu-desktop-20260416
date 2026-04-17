@@ -7,23 +7,23 @@ pub(crate) mod helpers;
 pub(crate) use helpers::*;
 
 mod commands;
-mod queries;
 pub(crate) mod html_table_import;
+mod queries;
 pub mod table_calc;
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use crate::model::document::Document;
 use crate::model::event::DocumentEvent;
 use crate::model::paragraph::Paragraph;
-use crate::renderer::pagination::PaginationResult;
-use crate::renderer::height_measurer::{MeasuredTable, MeasuredSection};
+use crate::parser::hwpx::reader::HwpxPackageSnapshot;
+use crate::renderer::composer::ComposedParagraph;
+use crate::renderer::height_measurer::{MeasuredSection, MeasuredTable};
 use crate::renderer::layout::LayoutEngine;
+use crate::renderer::pagination::PaginationResult;
 use crate::renderer::render_tree::PageRenderTree;
 use crate::renderer::style_resolver::ResolvedStyleSet;
-use crate::renderer::composer::ComposedParagraph;
 use crate::renderer::DEFAULT_DPI;
-use crate::parser::hwpx::reader::HwpxPackageSnapshot;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 /// 기본 폰트 fallback 경로
 pub const DEFAULT_FALLBACK_FONT: &str = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf";
@@ -148,7 +148,8 @@ pub struct DocumentCore {
     /// 이벤트 로그 (Command 실행 시 누적)
     pub(crate) event_log: Vec<DocumentEvent>,
     /// 글상자 오버플로우 연결 캐시 (섹션별, 지연 계산)
-    pub(crate) overflow_links_cache: RefCell<HashMap<usize, Vec<queries::doc_tree_nav::OverflowLink>>>,
+    pub(crate) overflow_links_cache:
+        RefCell<HashMap<usize, Vec<queries::doc_tree_nav::OverflowLink>>>,
     /// Undo/Redo용 Document 스냅샷 저장소 (ID → Document 클론)
     pub(crate) snapshot_store: Vec<(u32, Document)>,
     /// 다음 스냅샷 ID
@@ -202,7 +203,8 @@ impl DocumentCore {
             issues.push((
                 "distribution-document",
                 "blocker",
-                "Distribution documents open in protected view to avoid save corruption.".to_string(),
+                "Distribution documents open in protected view to avoid save corruption."
+                    .to_string(),
             ));
         }
         if !self.document.doc_info.font_faces.is_empty() {
@@ -233,13 +235,7 @@ impl DocumentCore {
         use crate::renderer::style_resolver::resolve_font_substitution;
 
         let lang_names = [
-            "hangul",
-            "latin",
-            "hanja",
-            "japanese",
-            "other",
-            "symbol",
-            "user",
+            "hangul", "latin", "hanja", "japanese", "other", "symbol", "user",
         ];
         let mut entries = std::collections::BTreeSet::new();
 
@@ -317,7 +313,10 @@ impl DocumentCore {
             blockers.push("Encrypted documents open in protected view during phase 1.".to_string());
         }
         if self.document.header.distribution {
-            blockers.push("Distribution documents open in protected view to avoid save corruption.".to_string());
+            blockers.push(
+                "Distribution documents open in protected view to avoid save corruption."
+                    .to_string(),
+            );
         }
         if self.source_format == DocumentSourceFormat::Hwpx {
             blockers.extend(self.hwpx_support_report().blockers);
@@ -407,12 +406,7 @@ impl DocumentCore {
             .join(",");
 
         format!(
-            concat!(
-                "{{",
-                "\"fallbackFont\":\"{}\",",
-                "\"items\":[{}]",
-                "}}"
-            ),
+            concat!("{{", "\"fallbackFont\":\"{}\",", "\"items\":[{}]", "}}"),
             json_escape(&report.fallback_font),
             entries,
         )
@@ -441,12 +435,14 @@ impl DocumentCore {
             items: self
                 .font_substitution_entries()
                 .into_iter()
-                .map(|(lang, original, resolved, substituted)| FontSubstitutionEntry {
-                    lang,
-                    original,
-                    resolved,
-                    substituted,
-                })
+                .map(
+                    |(lang, original, resolved, substituted)| FontSubstitutionEntry {
+                        lang,
+                        original,
+                        resolved,
+                        substituted,
+                    },
+                )
                 .collect(),
         }
     }
@@ -512,25 +508,35 @@ impl DocumentCore {
                 fonts.insert(resolved.to_string());
             }
         }
-        let fonts_json: Vec<String> = fonts.iter().map(|f| {
-            // 폰트 이름의 특수문자를 JSON 이스케이프 처리
-            let escaped: String = f.chars().flat_map(|c| match c {
+        let fonts_json: Vec<String> = fonts
+            .iter()
+            .map(|f| {
+                // 폰트 이름의 특수문자를 JSON 이스케이프 처리
+                let escaped: String = f
+                    .chars()
+                    .flat_map(|c| match c {
+                        '"' => vec!['\\', '"'],
+                        '\\' => vec!['\\', '\\'],
+                        '\n' => vec!['\\', 'n'],
+                        '\r' => vec!['\\', 'r'],
+                        '\t' => vec!['\\', 't'],
+                        c if c < '\x20' => vec![],
+                        c => vec![c],
+                    })
+                    .collect();
+                format!("\"{}\"", escaped)
+            })
+            .collect();
+
+        let escaped_fallback: String = self
+            .fallback_font
+            .chars()
+            .flat_map(|c| match c {
                 '"' => vec!['\\', '"'],
                 '\\' => vec!['\\', '\\'],
-                '\n' => vec!['\\', 'n'],
-                '\r' => vec!['\\', 'r'],
-                '\t' => vec!['\\', 't'],
-                c if c < '\x20' => vec![],
                 c => vec![c],
-            }).collect();
-            format!("\"{}\"", escaped)
-        }).collect();
-
-        let escaped_fallback: String = self.fallback_font.chars().flat_map(|c| match c {
-            '"' => vec!['\\', '"'],
-            '\\' => vec!['\\', '\\'],
-            c => vec![c],
-        }).collect();
+            })
+            .collect();
         format!(
             concat!(
                 "{{",
@@ -617,8 +623,8 @@ mod tests {
     use super::*;
     use crate::model::paragraph::Paragraph;
     use crate::model::style::Font;
-    use std::path::PathBuf;
     use serde_json::Value;
+    use std::path::PathBuf;
 
     #[test]
     fn compatibility_report_marks_encrypted_documents_as_blocked() {
@@ -655,9 +661,9 @@ mod tests {
         let items = report["items"].as_array().unwrap();
 
         assert_eq!(report["fallbackFont"], DEFAULT_FALLBACK_FONT);
-        assert!(items.iter().any(|item| {
-            item["lang"] == "hangul" && item["original"] == "CustomMissingFont"
-        }));
+        assert!(items
+            .iter()
+            .any(|item| { item["lang"] == "hangul" && item["original"] == "CustomMissingFont" }));
     }
 
     #[test]
@@ -666,17 +672,23 @@ mod tests {
         core.source_format = DocumentSourceFormat::Hwpx;
 
         let mut paragraph = Paragraph::new_empty();
-        paragraph.controls.push(crate::model::control::Control::Shape(Box::new(
-            crate::model::shape::ShapeObject::Curve(Default::default()),
-        )));
-        core.document.sections.push(crate::model::document::Section {
-            paragraphs: vec![paragraph],
-            ..Default::default()
-        });
+        paragraph
+            .controls
+            .push(crate::model::control::Control::Shape(Box::new(
+                crate::model::shape::ShapeObject::Curve(Default::default()),
+            )));
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
 
         let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
         let issues = report["issues"].as_array().unwrap();
-        assert!(issues.iter().any(|issue| issue["code"] == "hwpx-shape-curve"));
+        assert!(issues
+            .iter()
+            .any(|issue| issue["code"] == "hwpx-shape-curve"));
     }
 
     #[test]
@@ -698,5 +710,15 @@ mod tests {
         let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
 
         insta::assert_json_snapshot!("form_002_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_snapshot_for_table_vpos_preservation_sample() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples/table-vpos-01.hwpx");
+        let bytes = std::fs::read(sample).expect("read table-vpos-01.hwpx");
+        let core = DocumentCore::from_bytes(&bytes).expect("parse table-vpos-01.hwpx");
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("table_vpos_preservation_compatibility_report", report);
     }
 }
