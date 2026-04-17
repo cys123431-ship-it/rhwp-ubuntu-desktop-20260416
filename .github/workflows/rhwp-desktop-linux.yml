@@ -181,7 +181,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rhwp-ubuntu-deb
-          path: rhwp-desktop/src-tauri/target/release/bundle/deb/*.deb
+          path: rhwp-desktop/src-tauri/target/**/bundle/deb/*.deb
           if-no-files-found: error
           retention-days: 30
 
