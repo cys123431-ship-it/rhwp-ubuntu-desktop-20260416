@@ -1,0 +1,13 @@
+{
+  "file": "compatibility-corpus/fixtures/hyperlink-field.hwpx",
+  "sourceFormat": "hwpx",
+  "preferredSaveFormat": "hwpx",
+  "editMode": "editable-safe",
+  "issues": [
+    {
+      "code": "font-substitution",
+      "severity": "warning",
+      "message": "Layout may differ if required Hancom fonts are missing on this system."
+    }
+  ]
+}

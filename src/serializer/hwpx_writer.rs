@@ -742,6 +742,62 @@ mod tests_clean {
     }
 
     #[test]
+    fn test_supported_hyperlink_field_roundtrip() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let paragraph = Paragraph {
+            text: "Example".to_string(),
+            char_offsets: (0..7).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            field_ranges: vec![FieldRange {
+                start_char_idx: 0,
+                end_char_idx: 7,
+                control_idx: 0,
+            }],
+            controls: vec![Control::Field(Field {
+                field_type: FieldType::Hyperlink,
+                command: "https://example.com".to_string(),
+                field_id: 1,
+                ctrl_id: 1,
+                ..Default::default()
+            })],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 8,
+            has_para_text: true,
+            ..Default::default()
+        };
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let bytes = serialize_hwpx(&document).expect("serialize hyperlink field");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hyperlink field");
+        let para = &parsed.sections[0].paragraphs[0];
+
+        assert_eq!(para.text, "Example");
+        assert_eq!(para.field_ranges.len(), 1);
+        assert_eq!(para.field_ranges[0].start_char_idx, 0);
+        assert_eq!(para.field_ranges[0].end_char_idx, 7);
+
+        let Control::Field(field) = &para.controls[0] else {
+            panic!("expected hyperlink field");
+        };
+        assert_eq!(field.field_type, FieldType::Hyperlink);
+        assert_eq!(field.command, "https://example.com");
+    }
+
+    #[test]
     fn test_supported_equation_ruby_and_hidden_comment_roundtrip() {
         let mut document = Document::default();
         document.doc_info.font_faces = vec![Vec::new(); 7];

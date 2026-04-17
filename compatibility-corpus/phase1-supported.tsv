@@ -5,6 +5,7 @@
 fixtures/phase1-basic-text.hwpx	editable-safe	hwpx		save-reparse
 fixtures/phase1-number-bullet.hwpx	editable-safe	hwpx		save-reparse
 fixtures/phase1-clickhere-field.hwpx	editable-safe	hwpx		save-reparse
+fixtures/hyperlink-field.hwpx	editable-safe	hwpx		save-reparse
 fixtures/phase1-note-pair.hwpx	editable-safe	hwpx		save-reparse
 fixtures/phase1-header-footer.hwpx	editable-safe	hwpx		save-reparse
 fixtures/basic-shape.hwpx	editable-safe	hwpx		save-reparse

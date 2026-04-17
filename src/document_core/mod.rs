@@ -967,6 +967,17 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_report_snapshot_for_hyperlink_field_fixture() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("compatibility-corpus/fixtures/hyperlink-field.hwpx");
+        let bytes = std::fs::read(sample).expect("read hyperlink-field.hwpx");
+        let core = DocumentCore::from_bytes(&bytes).expect("parse hyperlink-field.hwpx");
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("hyperlink_field_compatibility_report", report);
+    }
+
+    #[test]
     fn compatibility_report_snapshot_for_table_vpos_preservation_sample() {
         let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples/table-vpos-01.hwpx");
         let bytes = std::fs::read(sample).expect("read table-vpos-01.hwpx");
