@@ -257,7 +257,7 @@ jobs:
 
       - name: Install package
         run: |
-          DEB_PATH="$(find dist -type f -name '*.deb' | head -n 1)"
+          DEB_PATH="$(find "$PWD/dist" -type f -name '*.deb' | head -n 1)"
           test -n "$DEB_PATH"
           sudo apt-get install -y "$DEB_PATH"
 
