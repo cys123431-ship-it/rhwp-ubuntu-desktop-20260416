@@ -1,0 +1,43 @@
+[
+  {
+    "scenario": "preserved-wave5-metadata",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "issues": [
+      {
+        "code": "hwpx-docinfo-extra-records",
+        "severity": "warning",
+        "message": "Extra DocInfo records are not preserved in HWPX saves yet."
+      },
+      {
+        "code": "hwpx-section-page-border-fill",
+        "severity": "warning",
+        "message": "Section 0 uses page border/fill settings that are not written to HWPX yet."
+      },
+      {
+        "code": "hwpx-section-master-pages",
+        "severity": "warning",
+        "message": "Section 0 uses master pages that are not written to HWPX yet."
+      },
+      {
+        "code": "hwpx-section-extra-records",
+        "severity": "warning",
+        "message": "Section 0 carries extra section records that are not preserved in HWPX yet."
+      }
+    ]
+  },
+  {
+    "scenario": "preserved-unknown-control",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "issues": [
+      {
+        "code": "hwpx-unknown-control",
+        "severity": "warning",
+        "message": "Paragraph 0 in section 0 contains unknown controls that are not written to HWPX yet."
+      }
+    ]
+  }
+]

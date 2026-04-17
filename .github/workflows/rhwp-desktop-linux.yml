@@ -59,10 +59,12 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
 
-      - name: Run Wave 2 Rust regression suite
+      - name: Run compatibility Rust regression suite
         run: |
           cargo nextest run --profile ci --lib serializer::hwpx_writer::tests_clean
           INSTA_UPDATE=no cargo nextest run --profile ci --lib compatibility_report_snapshot
+          cargo nextest run --profile ci --lib wave5_metadata
+          cargo nextest run --profile ci --lib unknown_control
 
       - name: Run cargo-deny
         run: cargo deny check advisories bans licenses sources
@@ -110,6 +112,14 @@ jobs:
                   "fixtures/shape-group.hwpx",
               }
           ]
+          wave4 = [
+              entry for entry in entries
+              if entry["path"] in {
+                  "fixtures/equation-basic.hwpx",
+                  "fixtures/ruby-basic.hwpx",
+                  "fixtures/hidden-comment.hwpx",
+              }
+          ]
 
           print("## Wave 2 Compatibility Summary")
           print()
@@ -122,6 +132,15 @@ jobs:
           print("### Wave 2 promoted documents")
           for entry in wave2:
               print(f"- `{entry['path']}` -> `{entry.get('editMode', 'unknown')}`")
+          print()
+          print("### Wave 4 fixtures")
+          for entry in wave4:
+              print(f"- `{entry['path']}` -> `{entry.get('editMode', 'unknown')}` / `{entry.get('roundtripMode', 'none')}`")
+          print()
+          print("### Wave 5 preservation policy")
+          print("- Clean snapshot-backed metadata stays `editable-safe` with warning severity.")
+          print("- Dirty metadata or dirty sections escalate back to `protected-view` blockers.")
+          print("- Covered issue codes: `hwpx-docinfo-extra-records`, `hwpx-section-page-border-fill`, `hwpx-section-master-pages`, `hwpx-section-extra-records`, `hwpx-unknown-control`.")
           if protected:
               print()
               print("### Remaining protected-view blockers")
@@ -148,6 +167,14 @@ jobs:
         with:
           name: rhwp-compatibility-reports
           path: compatibility-reports/**
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload compatibility result baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhwp-compatibility-baselines
+          path: compatibility-corpus/results/**
           if-no-files-found: error
           retention-days: 30
 
