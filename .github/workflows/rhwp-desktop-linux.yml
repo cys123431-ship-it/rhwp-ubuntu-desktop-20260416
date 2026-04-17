@@ -165,17 +165,31 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: rhwp-desktop/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install runtime dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-0 \
             libwebkit2gtk-4.1-0 \
+            webkit2gtk-driver \
             xdg-utils \
             desktop-file-utils \
             shared-mime-info \
             libglib2.0-bin \
             xvfb
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
 
       - name: Download Debian package
         uses: actions/download-artifact@v4
@@ -195,36 +209,31 @@ jobs:
           desktop-file-validate /usr/share/applications/rhwp.desktop
           update-mime-database /usr/share/mime
 
+      - name: Install WebDriver test dependencies
+        working-directory: rhwp-desktop
+        run: npm ci
+
+      - name: Run Wave 2 desktop end-to-end tests
+        working-directory: rhwp-desktop
+        env:
+          RHWP_E2E_APP: /usr/bin/rhwp
+        run: |
+          xvfb-run -a npm run e2e:installed
+
       - name: Verify file association command
         run: |
-          xdg-mime default rhwp.desktop application/x-hwp
-          xdg-mime default rhwp.desktop application/x-hwpx
           test "$(xdg-mime query default application/x-hwp)" = "rhwp.desktop"
           test "$(xdg-mime query default application/x-hwpx)" = "rhwp.desktop"
 
-      - name: Launch app with sample HWP file
+      - name: Publish desktop E2E summary
         run: |
-          sample_path="$GITHUB_WORKSPACE/samples/re-01-hangul-only.hwp"
-          test -f "$sample_path"
-          set +e
-          xvfb-run -a timeout 20s rhwp "$sample_path"
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
-            exit "$status"
-          fi
-
-      - name: Launch app with sample HWPX file
-        run: |
-          sample_path="$GITHUB_WORKSPACE/samples/table-vpos-01.hwpx"
-          test -f "$sample_path"
-          set +e
-          xvfb-run -a timeout 20s rhwp "$sample_path"
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
-            exit "$status"
-          fi
+          {
+            echo "## Ubuntu Desktop E2E"
+            echo
+            echo "- Installed package: \`rhwp\`"
+            echo "- Display matrix target: \`${{ matrix.ubuntu-version }}\`"
+            echo "- Verified: first-run default-app banner, HWPX startup open, recovery restore/delete, multi-window startup fan-out"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish-release:
     name: Upload Debian Package To Release

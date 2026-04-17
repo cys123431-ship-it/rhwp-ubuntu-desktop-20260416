@@ -47,10 +47,28 @@ Ubuntu packaging assets live under [packaging/linux](./packaging/linux).
 
 - `.github/workflows/rhwp-desktop-linux.yml` builds the Ubuntu `.deb` on `ubuntu-22.04`.
 - The same workflow regenerates synthetic phase-1-safe HWPX fixtures, validates the `phase1-supported` / `phase1-protected` / `phase2-extended` corpus manifests, and uploads per-document `compat-report` artifacts for the phase-2 set before packaging.
-- The same workflow installs the package on `ubuntu-24.04`, validates the desktop and MIME assets, configures `xdg-mime`, and launches sample `.hwp` and `.hwpx` files under `xvfb`.
+- The same workflow installs the package on `ubuntu-22.04` and `ubuntu-24.04`, validates the desktop and MIME assets, and runs installed-package WebDriver E2E under `xvfb`.
 - Tag pushes matching `v*` upload the `.deb` artifact to the GitHub release automatically.
 
 Corpus manifests live under [`compatibility-corpus/`](../compatibility-corpus/README.md).
+
+## Wave 2 desktop E2E
+
+The installed-package E2E suite lives under [`e2e/`](./e2e/) and exercises the packaged Ubuntu app through `tauri-driver` + `selenium-webdriver`.
+
+The automated Wave 2 flow verifies:
+
+- the first-run `Set as default app` banner
+- startup open of the representative Wave 2 HWPX sample
+- recovery snapshot restore and cleanup after save
+- one-window-per-file startup fan-out for multiple input documents
+
+Run it locally on Ubuntu after installing the package and `tauri-driver`:
+
+1. Install `webkit2gtk-driver`.
+2. Export `RHWP_E2E_APP=/usr/bin/rhwp` if needed.
+3. Run `npm ci` in `rhwp-desktop`.
+4. Run `npm run e2e:installed`.
 
 ## Compatibility roadmap
 

@@ -1,5 +1,5 @@
 import { WasmBridge } from '@/core/wasm-bridge';
-import type { DocumentInfo, RecoverySnapshotMeta } from '@/core/types';
+import type { DocumentInfo, DocumentSession, RecentDocument, RecoverySnapshotMeta } from '@/core/types';
 import { EventBus } from '@/core/event-bus';
 import { createDocumentIO, type OpenDocumentResult } from '@/core/document-io';
 import { DocumentSessionStore, createRecentDocument } from '@/core/document-session';
@@ -31,6 +31,50 @@ const wasm = new WasmBridge();
 const eventBus = new EventBus();
 const documentIO = createDocumentIO();
 const documentSession = new DocumentSessionStore();
+let e2eReady = false;
+
+type RhwpE2EBannerState = {
+  visible: boolean;
+  text: string;
+  className: string;
+  actions: string[];
+};
+
+type RhwpE2EDialogState = {
+  visible: boolean;
+  title: string;
+  message: string;
+};
+
+type RhwpE2ERuntimeState = {
+  ready: boolean;
+  pageCount: number;
+  statusMessage: string;
+  session: DocumentSession;
+  banner: RhwpE2EBannerState;
+  dialog: RhwpE2EDialogState;
+};
+
+type RhwpE2EBridge = {
+  isReady: () => boolean;
+  getRuntimeState: () => RhwpE2ERuntimeState;
+  clickBannerAction: (label?: string) => Promise<boolean>;
+  markDocumentDirty: () => Promise<boolean>;
+  appendTextToParagraph: (text: string, sectionIndex?: number, paragraphIndex?: number) => Promise<boolean>;
+  saveCurrentDocument: () => Promise<boolean>;
+  flushRecoverySnapshot: () => Promise<string | null>;
+  listRecoverySnapshots: () => Promise<RecoverySnapshotMeta[]>;
+  getRecentDocuments: () => Promise<RecentDocument[]>;
+  getOpenDialog: () => RhwpE2EDialogState;
+  acceptActiveDialog: () => Promise<boolean>;
+  dismissActiveDialog: () => Promise<boolean>;
+};
+
+declare global {
+  interface Window {
+    __RHWP_E2E__?: RhwpE2EBridge;
+  }
+}
 
 // E2E 테스트용 전역 노출 (개발 모드 전용)
 if (import.meta.env.DEV) {
@@ -101,6 +145,168 @@ const sessionBanner = () => document.getElementById('session-banner')!;
 
 function toUint8Array(bytes: Uint8Array | number[]): Uint8Array {
   return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+}
+
+function cloneSession(session: Readonly<DocumentSession>): DocumentSession {
+  return {
+    ...session,
+    blockers: [...session.blockers],
+    warnings: [...session.warnings],
+    compatibilityIssues: session.compatibilityIssues.map((item) => ({ ...item })),
+    fontSubstitutions: session.fontSubstitutions.map((item) => ({ ...item })),
+    associationStatus: session.associationStatus
+      ? {
+        ...session.associationStatus,
+        pendingMimeTypes: [...session.associationStatus.pendingMimeTypes],
+      }
+      : null,
+  };
+}
+
+function getSessionBannerState(): RhwpE2EBannerState {
+  const banner = sessionBanner();
+  const text = banner.querySelector('.session-banner__text')?.textContent?.trim() ?? '';
+  const actions = Array.from(banner.querySelectorAll<HTMLButtonElement>('.session-banner__button'))
+    .map((button) => button.textContent?.trim() ?? '')
+    .filter((label) => label.length > 0);
+
+  return {
+    visible: !banner.hidden,
+    text,
+    className: banner.className,
+    actions,
+  };
+}
+
+function getDialogState(): RhwpE2EDialogState {
+  const overlay = document.querySelector<HTMLElement>('.modal-overlay');
+  if (!overlay) {
+    return { visible: false, title: '', message: '' };
+  }
+
+  return {
+    visible: true,
+    title: overlay.querySelector('.dialog-title')?.textContent?.replace('×', '').trim() ?? '',
+    message: overlay.querySelector('.dialog-body')?.textContent?.trim() ?? '',
+  };
+}
+
+function getRuntimeState(): RhwpE2ERuntimeState {
+  return {
+    ready: e2eReady,
+    pageCount: wasm.pageCount,
+    statusMessage: sbMessage()?.textContent?.trim() ?? '',
+    session: cloneSession(documentSession.current),
+    banner: getSessionBannerState(),
+    dialog: getDialogState(),
+  };
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  timeoutMs = 10000,
+  intervalMs = 100,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return true;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+  return predicate();
+}
+
+async function clickBannerAction(label?: string): Promise<boolean> {
+  const banner = sessionBanner();
+  if (banner.hidden) return false;
+
+  const buttons = Array.from(banner.querySelectorAll<HTMLButtonElement>('.session-banner__button'));
+  const target = label
+    ? buttons.find((button) => button.textContent?.trim() === label)
+    : buttons[0];
+  if (!target) return false;
+
+  target.click();
+  return true;
+}
+
+async function markDocumentDirty(): Promise<boolean> {
+  if (!documentSession.current.hasDocument || documentSession.current.isProtected) {
+    return false;
+  }
+
+  documentSession.markDirty();
+  wasm.markDirty();
+  syncSessionFromWasm();
+  eventBus.emit('command-state-changed');
+  return true;
+}
+
+async function appendTextToParagraph(
+  text: string,
+  sectionIndex = 0,
+  paragraphIndex = 0,
+): Promise<boolean> {
+  if (!documentSession.current.hasDocument || documentSession.current.isProtected) {
+    return false;
+  }
+
+  const charOffset = wasm.getParagraphLength(sectionIndex, paragraphIndex);
+  wasm.insertText(sectionIndex, paragraphIndex, charOffset, text);
+  eventBus.emit('document-changed');
+  return true;
+}
+
+async function saveCurrentDocument(): Promise<boolean> {
+  if (!documentSession.current.hasDocument || documentSession.current.isProtected) {
+    return false;
+  }
+
+  const dispatched = dispatcher.dispatch('file:save');
+  if (!dispatched) {
+    return false;
+  }
+
+  return waitForCondition(() => !documentSession.current.dirty, 15000, 100);
+}
+
+async function flushRecoverySnapshot(): Promise<string | null> {
+  await persistRecoverySnapshot();
+  return documentSession.current.recoverySnapshotId;
+}
+
+async function acceptActiveDialog(): Promise<boolean> {
+  const button = document.querySelector<HTMLButtonElement>('.modal-overlay .dialog-btn-primary');
+  if (!button) return false;
+  button.click();
+  return true;
+}
+
+async function dismissActiveDialog(): Promise<boolean> {
+  const button = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.modal-overlay .dialog-btn'),
+  ).find((candidate) => !candidate.classList.contains('dialog-btn-primary'));
+  if (!button) return false;
+  button.click();
+  return true;
+}
+
+function installE2EBridge(): void {
+  window.__RHWP_E2E__ = {
+    isReady: () => e2eReady,
+    getRuntimeState,
+    clickBannerAction,
+    markDocumentDirty,
+    appendTextToParagraph,
+    saveCurrentDocument,
+    flushRecoverySnapshot,
+    listRecoverySnapshots: () => documentIO.listRecoverySnapshots(),
+    getRecentDocuments: () => documentIO.getRecentDocuments(),
+    getOpenDialog: getDialogState,
+    acceptActiveDialog,
+    dismissActiveDialog,
+  };
 }
 
 function findMatchingRecoverySnapshot(
@@ -392,6 +598,7 @@ async function loadOpenResult(result: OpenDocumentResult): Promise<void> {
 
 async function initialize(): Promise<void> {
   const msg = sbMessage();
+  e2eReady = false;
   try {
     msg.textContent = '웹폰트 로딩 중...';
     await loadWebFonts([]);  // CSS @font-face 등록 + CRITICAL 폰트만 로드
@@ -501,6 +708,7 @@ async function initialize(): Promise<void> {
       (window as any).__inputHandler = inputHandler;
       (window as any).__canvasView = canvasView;
     }
+    e2eReady = true;
   } catch (error) {
     msg.textContent = `WASM 초기화 실패: ${error}`;
     console.error('[main] WASM 초기화 실패:', error);
@@ -900,6 +1108,7 @@ async function loadFromUrlParam(): Promise<void> {
   }
 }
 
+installE2EBridge();
 initialize();
 
 window.addEventListener('beforeunload', (event) => {

@@ -63,3 +63,5 @@ Emit per-entry JSON reports while validating a manifest:
 ```powershell
 cargo run --bin rhwp -- compat-corpus --json --emit-reports compatibility-reports/phase2 compatibility-corpus/phase2-extended.tsv
 ```
+
+Wave 2 shape promotion is finally gated by the Windows Hancom manual checklist in [`WAVE2_WINDOWS_HANCOM_CHECKLIST.md`](./WAVE2_WINDOWS_HANCOM_CHECKLIST.md).
