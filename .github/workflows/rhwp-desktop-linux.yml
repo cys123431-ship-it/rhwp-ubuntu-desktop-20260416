@@ -135,7 +135,7 @@ jobs:
           for entry in wave2:
               print(f"- `{entry['path']}` -> `{entry.get('editMode', 'unknown')}`")
           print()
-          print("### Wave 4 fixtures")
+          print("### Wave 4 promoted documents")
           for entry in wave4:
               print(f"- `{entry['path']}` -> `{entry.get('editMode', 'unknown')}` / `{entry.get('roundtripMode', 'none')}`")
           print()

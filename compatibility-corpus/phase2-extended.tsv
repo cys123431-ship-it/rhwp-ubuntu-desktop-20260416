@@ -6,9 +6,6 @@
 ../samples/draw-group.hwp	editable-safe	hwp		save-reparse
 ../rhwp-studio/public/samples/number-bullet.hwp			none
 ../rhwp-studio/public/samples/form-002.hwpx	editable-safe	hwpx		save-reparse
-fixtures/equation-basic.hwpx	editable-safe	hwpx		save-reparse
-fixtures/ruby-basic.hwpx	editable-safe	hwpx		save-reparse
-fixtures/hidden-comment.hwpx	editable-safe	hwpx		save-reparse
 ../samples/table-vpos-01.hwpx	editable-safe	hwpx	hwpx-field-missing-range,hwpx-char-overlap	none
 fixtures/unsupported-shape-clean-section.hwpx	editable-safe	hwpx	hwpx-shape-unsupported	none
 fixtures/unsupported-shape-dirty-section.hwpx	editable-safe	hwpx	hwpx-shape-unsupported	none

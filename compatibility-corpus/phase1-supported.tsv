@@ -12,3 +12,6 @@ fixtures/basic-shape.hwpx	editable-safe	hwpx		save-reparse
 fixtures/textbox-in-shape.hwpx	editable-safe	hwpx		save-reparse
 fixtures/picture-caption.hwpx	editable-safe	hwpx		save-reparse
 fixtures/shape-group.hwpx	editable-safe	hwpx		save-reparse
+fixtures/equation-basic.hwpx	editable-safe	hwpx		save-reparse
+fixtures/ruby-basic.hwpx	editable-safe	hwpx		save-reparse
+fixtures/hidden-comment.hwpx	editable-safe	hwpx		save-reparse
