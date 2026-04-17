@@ -1,0 +1,10 @@
+# path	expected_edit_mode	expected_save_format	required_issue_codes	roundtrip_mode
+../samples/field-01.hwp			none
+../samples/footnote-01.hwp			none
+../samples/endnote-01.hwp			none
+../samples/eq-01.hwp			none
+../samples/draw-group.hwp			none
+../rhwp-studio/public/samples/number-bullet.hwp			none
+../rhwp-studio/public/samples/form-002.hwpx			none
+../samples/table-vpos-01.hwpx			none
+../samples/tac-img-02.hwpx			none

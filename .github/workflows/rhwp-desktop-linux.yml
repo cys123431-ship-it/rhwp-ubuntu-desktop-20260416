@@ -62,6 +62,15 @@ jobs:
           npm ci
           npm run build
 
+      - name: Generate synthetic phase1 HWPX fixtures
+        run: cargo run --quiet --bin rhwp -- compat-generate-fixtures compatibility-corpus/fixtures
+
+      - name: Validate phase1 supported corpus
+        run: cargo run --quiet --bin rhwp -- compat-corpus compatibility-corpus/phase1-supported.tsv
+
+      - name: Validate phase1 protected corpus
+        run: cargo run --quiet --bin rhwp -- compat-corpus compatibility-corpus/phase1-protected.tsv
+
       - name: Build Ubuntu package
         working-directory: rhwp-desktop
         run: |

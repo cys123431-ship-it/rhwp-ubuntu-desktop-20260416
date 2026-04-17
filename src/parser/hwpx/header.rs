@@ -111,6 +111,9 @@ pub fn parse_hwpx_header(xml: &str) -> Result<(DocInfo, DocProperties), HwpxErro
                     b"numbering" => {
                         parse_numbering(e, &mut reader, &mut doc_info)?;
                     }
+                    b"bullet" => {
+                        parse_bullet(e, &mut reader, &mut doc_info)?;
+                    }
                     _ => {}
                 }
             }
@@ -132,6 +135,7 @@ pub fn parse_hwpx_header(xml: &str) -> Result<(DocInfo, DocProperties), HwpxErro
                         }
                         doc_info.tab_defs.push(td);
                     }
+                    b"bullet" => parse_bullet_empty(e, &mut doc_info),
                     _ => {}
                 }
             }
@@ -144,9 +148,9 @@ pub fn parse_hwpx_header(xml: &str) -> Result<(DocInfo, DocProperties), HwpxErro
 
     doc_props.section_count = 1; // content.hpf에서 갱신됨
 
+    doc_info.bullet_count = doc_info.bullets.len() as u32;
     Ok((doc_info, doc_props))
 }
-
 // ─── beginNum ───
 
 fn parse_begin_num(e: &quick_xml::events::BytesStart, props: &mut DocProperties) {
@@ -1089,6 +1093,81 @@ fn parse_numbering(
 }
 
 // ─── 유틸리티 함수 (header 전용) ───
+
+fn parse_bullet(
+    e: &quick_xml::events::BytesStart,
+    reader: &mut Reader<&[u8]>,
+    doc_info: &mut DocInfo,
+) -> Result<(), HwpxError> {
+    let mut bullet = parse_bullet_attrs(e);
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Empty(ref ce)) | Ok(Event::Start(ref ce)) => {
+                let cname = ce.name(); let local = local_name(cname.as_ref());
+                if local == b"paraHead" {
+                    parse_bullet_para_head(ce, &mut bullet);
+                }
+            }
+            Ok(Event::End(ref ee)) => {
+                let ename = ee.name();
+                if local_name(ename.as_ref()) == b"bullet" {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(HwpxError::XmlError(format!("bullet: {}", e))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    doc_info.bullets.push(bullet);
+    Ok(())
+}
+
+fn parse_bullet_empty(e: &quick_xml::events::BytesStart, doc_info: &mut DocInfo) {
+    doc_info.bullets.push(parse_bullet_attrs(e));
+}
+
+fn parse_bullet_attrs(e: &quick_xml::events::BytesStart) -> Bullet {
+    let mut bullet = Bullet::default();
+    for attr in e.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"char" => {
+                let value = attr_str(&attr);
+                bullet.bullet_char = value.chars().next().unwrap_or('•');
+            }
+            b"useImage" => {
+                if parse_bool(&attr) {
+                    bullet.image_bullet = 1;
+                }
+            }
+            b"checkedChar" => {
+                let value = attr_str(&attr);
+                bullet.check_bullet_char = value.chars().next().unwrap_or('\0');
+            }
+            _ => {}
+        }
+    }
+
+    if bullet.check_bullet_char == '\0' {
+        bullet.check_bullet_char = bullet.bullet_char;
+    }
+
+    bullet
+}
+
+fn parse_bullet_para_head(e: &quick_xml::events::BytesStart, bullet: &mut Bullet) {
+    for attr in e.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"widthAdjust" => bullet.width_adjust = parse_i16(&attr),
+            b"textOffset" => bullet.text_distance = parse_i16(&attr),
+            _ => {}
+        }
+    }
+}
 
 fn is_empty_event(_e: &quick_xml::events::BytesStart) -> bool {
     // quick-xml의 Event::Empty vs Event::Start 구분으로 판단

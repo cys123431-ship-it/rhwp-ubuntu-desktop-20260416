@@ -59,6 +59,35 @@ impl DocumentEditMode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompatibilityIssueEntry {
+    pub code: &'static str,
+    pub severity: &'static str,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompatibilityReportData {
+    pub source_format: DocumentSourceFormat,
+    pub preferred_save_format: DocumentSourceFormat,
+    pub edit_mode: DocumentEditMode,
+    pub issues: Vec<CompatibilityIssueEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontSubstitutionEntry {
+    pub lang: String,
+    pub original: String,
+    pub resolved: String,
+    pub substituted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontSubstitutionReportData {
+    pub fallback_font: String,
+    pub items: Vec<FontSubstitutionEntry>,
+}
+
 /// 내부 클립보드 데이터
 pub(crate) struct ClipboardData {
     /// 복사된 문단들 (서식 정보 포함)
@@ -187,15 +216,12 @@ impl DocumentCore {
             let report = self.hwpx_support_report();
             issues.extend(
                 report
-                    .blockers
+                    .issues
                     .into_iter()
-                    .map(|message| ("hwpx-unsupported", "blocker", message)),
-            );
-            issues.extend(
-                report
-                    .warnings
-                    .into_iter()
-                    .map(|message| ("hwpx-warning", "warning", message)),
+                    .filter_map(|issue| match issue.code {
+                        "hwpx-encrypted-document" | "hwpx-distribution-document" => None,
+                        _ => Some((issue.code, issue.severity.as_str(), issue.message)),
+                    }),
             );
         }
 
@@ -309,10 +335,11 @@ impl DocumentCore {
     }
 
     pub fn get_compatibility_report(&self) -> String {
-        let issues = self
-            .compatibility_issue_entries()
+        let report = self.compatibility_report_data();
+        let issues = report
+            .issues
             .into_iter()
-            .map(|(code, severity, message)| {
+            .map(|issue| {
                 format!(
                     concat!(
                         "{{",
@@ -321,9 +348,9 @@ impl DocumentCore {
                         "\"message\":\"{}\"",
                         "}}"
                     ),
-                    code,
-                    severity,
-                    json_escape(&message),
+                    issue.code,
+                    issue.severity,
+                    json_escape(&issue.message),
                 )
             })
             .collect::<Vec<_>>()
@@ -338,18 +365,19 @@ impl DocumentCore {
                 "\"issues\":[{}]",
                 "}}"
             ),
-            self.source_format.as_str(),
-            self.preferred_save_format().as_str(),
-            self.edit_mode().as_str(),
+            report.source_format.as_str(),
+            report.preferred_save_format.as_str(),
+            report.edit_mode.as_str(),
             issues,
         )
     }
 
     pub fn get_font_substitution_report(&self) -> String {
-        let entries = self
-            .font_substitution_entries()
+        let report = self.font_substitution_report_data();
+        let entries = report
+            .items
             .into_iter()
-            .map(|(lang, original, resolved, substituted)| {
+            .map(|item| {
                 format!(
                     concat!(
                         "{{",
@@ -359,10 +387,10 @@ impl DocumentCore {
                         "\"substituted\":{}",
                         "}}"
                     ),
-                    json_escape(&lang),
-                    json_escape(&original),
-                    json_escape(&resolved),
-                    substituted,
+                    json_escape(&item.lang),
+                    json_escape(&item.original),
+                    json_escape(&item.resolved),
+                    item.substituted,
                 )
             })
             .collect::<Vec<_>>()
@@ -375,9 +403,42 @@ impl DocumentCore {
                 "\"items\":[{}]",
                 "}}"
             ),
-            json_escape(&self.fallback_font),
+            json_escape(&report.fallback_font),
             entries,
         )
+    }
+
+    pub fn compatibility_report_data(&self) -> CompatibilityReportData {
+        CompatibilityReportData {
+            source_format: self.source_format(),
+            preferred_save_format: self.preferred_save_format(),
+            edit_mode: self.edit_mode(),
+            issues: self
+                .compatibility_issue_entries()
+                .into_iter()
+                .map(|(code, severity, message)| CompatibilityIssueEntry {
+                    code,
+                    severity,
+                    message,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn font_substitution_report_data(&self) -> FontSubstitutionReportData {
+        FontSubstitutionReportData {
+            fallback_font: self.fallback_font.clone(),
+            items: self
+                .font_substitution_entries()
+                .into_iter()
+                .map(|(lang, original, resolved, substituted)| FontSubstitutionEntry {
+                    lang,
+                    original,
+                    resolved,
+                    substituted,
+                })
+                .collect(),
+        }
     }
 
     pub fn get_document_capabilities(&self) -> String {
@@ -544,6 +605,7 @@ impl DocumentCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::paragraph::Paragraph;
     use crate::model::style::Font;
     use serde_json::Value;
 
@@ -585,5 +647,24 @@ mod tests {
         assert!(items.iter().any(|item| {
             item["lang"] == "hangul" && item["original"] == "CustomMissingFont"
         }));
+    }
+
+    #[test]
+    fn compatibility_report_uses_feature_issue_codes_for_hwpx_blockers() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+
+        let mut paragraph = Paragraph::new_empty();
+        paragraph.controls.push(crate::model::control::Control::Shape(Box::new(
+            crate::model::shape::ShapeObject::Line(Default::default()),
+        )));
+        core.document.sections.push(crate::model::document::Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+        let issues = report["issues"].as_array().unwrap();
+        assert!(issues.iter().any(|issue| issue["code"] == "hwpx-shape"));
     }
 }

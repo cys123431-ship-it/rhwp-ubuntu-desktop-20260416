@@ -22,7 +22,7 @@ use crate::model::shape::{
 };
 use crate::model::style::{ShapeBorderLine, Fill};
 use crate::model::page::{PageDef, ColumnDef, ColumnType, ColumnDirection};
-use crate::model::paragraph::{CharShapeRef, LineSeg, Paragraph};
+use crate::model::paragraph::{CharShapeRef, FieldRange, LineSeg, Paragraph};
 use crate::model::table::{Cell, Table, TablePageBreak, VerticalAlign};
 use crate::model::HwpUnit16;
 
@@ -298,11 +298,9 @@ fn parse_paragraph(
 
     // 텍스트 조립: 제어 문자(\u{0002})는 HWP와 동일하게 텍스트에서 제외
     // HWP에서 컨트롤 위치는 char_offsets의 갭으로 표현됨
-    para.text = text_parts.iter()
-        .filter(|s| *s != "\u{0002}")
-        .cloned()
-        .collect::<Vec<_>>()
-        .join("");
+    let (plain_text, field_ranges) = extract_field_text_and_ranges(&text_parts, &para.controls);
+    para.text = plain_text;
+    para.field_ranges = field_ranges;
 
     // char_offsets 생성 (각 문자의 UTF-16 위치)
     // HWP 바이너리에서 탭 문자는 확장 데이터 포함 8 code unit을 차지하므로
@@ -2151,15 +2149,27 @@ fn parse_field_begin_attrs(e: &quick_xml::events::BytesStart) -> Field {
     let mut f = Field::default();
     for attr in e.attributes().flatten() {
         match attr.key.as_ref() {
+            b"id" => f.ctrl_id = parse_u32(&attr),
             b"type" => f.field_type = parse_field_type(&attr_str(&attr)),
-            b"name" => f.command = attr_str(&attr),
+            b"name" => {
+                let value = attr_str(&attr);
+                if !value.is_empty() {
+                    f.ctrl_data_name = Some(value);
+                }
+            }
+            b"editable" => {
+                if parse_bool_attr(&attr) {
+                    f.properties |= 1;
+                }
+            }
+            b"fieldid" => f.field_id = parse_u32(&attr),
             _ => {}
         }
     }
     f
 }
-
 /// numType 문자열 → AutoNumberType 변환
+
 fn parse_num_type(s: &str) -> AutoNumberType {
     match s {
         "PAGE" => AutoNumberType::Page,
@@ -2362,29 +2372,74 @@ fn parse_field_parameters(
     field: &mut Field,
 ) -> Result<(), HwpxError> {
     let mut buf = Vec::new();
-    let mut in_command = false;
+    let mut current_string_param: Option<String> = None;
+    let mut current_integer_param: Option<String> = None;
+    let mut clickhere_direction: Option<String> = None;
+    let mut clickhere_help_state: Option<String> = None;
+    let mut clickhere_name: Option<String> = None;
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref ce)) | Ok(Event::Empty(ref ce)) => {
+            Ok(Event::Start(ref ce)) => {
                 let cname = ce.name(); let local = local_name(cname.as_ref());
                 if local == b"stringParam" {
                     for attr in ce.attributes().flatten() {
-                        if attr.key.as_ref() == b"name" && attr_str(&attr) == "Command" {
-                            in_command = true;
+                        if attr.key.as_ref() == b"name" {
+                            current_string_param = Some(attr_str(&attr));
+                        }
+                    }
+                } else if local == b"integerParam" {
+                    for attr in ce.attributes().flatten() {
+                        if attr.key.as_ref() == b"name" {
+                            current_integer_param = Some(attr_str(&attr));
                         }
                     }
                 }
             }
+            Ok(Event::Empty(ref ce)) => {
+                let cname = ce.name(); let local = local_name(cname.as_ref());
+                if local == b"stringParam" {
+                    let mut name = None;
+                    for attr in ce.attributes().flatten() {
+                        if attr.key.as_ref() == b"name" {
+                            name = Some(attr_str(&attr));
+                        }
+                    }
+                    if let Some(name) = name {
+                        apply_field_string_parameter(
+                            field,
+                            &name,
+                            "",
+                            &mut clickhere_direction,
+                            &mut clickhere_help_state,
+                            &mut clickhere_name,
+                        );
+                    }
+                }
+            }
             Ok(Event::Text(ref t)) => {
-                if in_command {
-                    field.command = t.decode().unwrap_or_default().to_string();
-                    in_command = false;
+                let value = t.decode().unwrap_or_default().to_string();
+                if let Some(name) = current_string_param.as_deref() {
+                    apply_field_string_parameter(
+                        field,
+                        name,
+                        &value,
+                        &mut clickhere_direction,
+                        &mut clickhere_help_state,
+                        &mut clickhere_name,
+                    );
+                } else if let Some(name) = current_integer_param.as_deref() {
+                    if name == "Prop" {
+                        field.properties = value.trim().parse().unwrap_or(field.properties);
+                    }
                 }
             }
             Ok(Event::End(ref ee)) => {
                 let eename = ee.name();
-                if local_name(eename.as_ref()) == b"parameters" {
-                    break;
+                match local_name(eename.as_ref()) {
+                    b"stringParam" => current_string_param = None,
+                    b"integerParam" => current_integer_param = None,
+                    b"parameters" => break,
+                    _ => {}
                 }
             }
             Ok(Event::Eof) => break,
@@ -2393,7 +2448,40 @@ fn parse_field_parameters(
         }
         buf.clear();
     }
+
+    if field.command.is_empty() && field.field_type == FieldType::ClickHere {
+        let guide = clickhere_direction.unwrap_or_default();
+        let memo = clickhere_help_state.unwrap_or_default();
+        let name = clickhere_name
+            .or_else(|| field.ctrl_data_name.clone())
+            .unwrap_or_default();
+        if !guide.is_empty() || !memo.is_empty() || !name.is_empty() {
+            field.command = Field::build_clickhere_command(&guide, &memo, &name);
+        }
+    }
+
     Ok(())
+}
+
+fn apply_field_string_parameter(
+    field: &mut Field,
+    name: &str,
+    value: &str,
+    clickhere_direction: &mut Option<String>,
+    clickhere_help_state: &mut Option<String>,
+    clickhere_name: &mut Option<String>,
+) {
+    match name {
+        "Command" => field.command = value.to_string(),
+        "Name" => {
+            let value = value.to_string();
+            field.ctrl_data_name = Some(value.clone());
+            *clickhere_name = Some(value);
+        }
+        "Direction" => *clickhere_direction = Some(value.to_string()),
+        "HelpState" => *clickhere_help_state = Some(value.to_string()),
+        _ => {}
+    }
 }
 
 /// 서브리스트(subList) 내의 문단들을 파싱한다.
@@ -2700,8 +2788,50 @@ fn parse_equation(
 fn calc_utf16_len_from_parts(parts: &[String]) -> u32 {
     parts.iter()
         .flat_map(|s| s.chars())
+        .filter(|c| !matches!(c, '\u{0002}' | '\u{0003}' | '\u{0004}'))
         .map(|c| if c == '\t' { 8u32 } else if (c as u32) > 0xFFFF { 2 } else { 1 })
         .sum()
+}
+
+fn extract_field_text_and_ranges(parts: &[String], controls: &[Control]) -> (String, Vec<FieldRange>) {
+    let mut text = String::new();
+    let mut field_ranges = Vec::new();
+    let field_control_indices = controls
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, control)| matches!(control, Control::Field(_)).then_some(idx))
+        .collect::<Vec<_>>();
+
+    let mut next_field = 0usize;
+    let mut text_char_idx = 0usize;
+    let mut field_stack: Vec<(usize, usize)> = Vec::new();
+
+    for ch in parts.iter().flat_map(|part| part.chars()) {
+        match ch {
+            '\u{0002}' => {}
+            '\u{0003}' => {
+                if let Some(control_idx) = field_control_indices.get(next_field).copied() {
+                    field_stack.push((text_char_idx, control_idx));
+                }
+                next_field += 1;
+            }
+            '\u{0004}' => {
+                if let Some((start_char_idx, control_idx)) = field_stack.pop() {
+                    field_ranges.push(FieldRange {
+                        start_char_idx,
+                        end_char_idx: text_char_idx,
+                        control_idx,
+                    });
+                }
+            }
+            other => {
+                text.push(other);
+                text_char_idx += 1;
+            }
+        }
+    }
+
+    (text, field_ranges)
 }
 
 // ─── 양식 컨트롤 파싱 ───

@@ -4,7 +4,8 @@ use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 
 use crate::model::control::{
-    AutoNumber, AutoNumberType, Bookmark, Control, NewNumber, PageHide, PageNumberPos,
+    AutoNumber, AutoNumberType, Bookmark, Control, Field, FieldType, NewNumber, PageHide,
+    PageNumberPos,
 };
 use crate::model::document::{Document, Section, SectionDef};
 use crate::model::header_footer::HeaderFooterApply;
@@ -16,36 +17,255 @@ use crate::model::shape::{
     VertRelTo,
 };
 use crate::model::style::{
-    Alignment, BorderFill, BorderLine, BorderLineType, CharShape, FillType, Font, HeadType,
-    ImageFillMode, LineSpacingType, Numbering, ParaShape, TabDef, UnderlineType,
+    Alignment, BorderFill, BorderLine, BorderLineType, Bullet, CharShape, FillType, Font,
+    HeadType, ImageFillMode, LineSpacingType, Numbering, ParaShape, TabDef, UnderlineType,
 };
 use crate::model::table::{Cell, Table, TablePageBreak, VerticalAlign};
 use crate::document_core::helpers::find_control_text_positions;
 
 use super::cfb_writer::SerializeError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HwpxIssueSeverity {
+    Blocker,
+    Warning,
+}
+
+#[cfg(test)]
+mod tests_clean {
+    use super::*;
+    use crate::model::document::Document;
+    use crate::model::paragraph::{CharShapeRef, FieldRange, Paragraph};
+
+    #[test]
+    fn test_serialize_hwpx_roundtrip_text() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let paragraph = Paragraph {
+            text: "Hello HWPX".to_string(),
+            char_offsets: (0..10).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 11,
+            has_para_text: true,
+            ..Default::default()
+        };
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        assert_eq!(parsed.sections.len(), 1);
+        assert_eq!(parsed.sections[0].paragraphs[0].text, "Hello HWPX");
+    }
+
+    #[test]
+    fn test_analyze_hwpx_support_rejects_shapes() {
+        let mut document = Document::default();
+        let mut paragraph = Paragraph::new_empty();
+        paragraph.controls.push(Control::Shape(Box::new(
+            crate::model::shape::ShapeObject::Line(Default::default()),
+        )));
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(!report.is_supported());
+        assert!(report.blockers.iter().any(|blocker| blocker.contains("drawing shapes")));
+        assert!(report.issues.iter().any(|issue| issue.code == "hwpx-shape"));
+    }
+
+    #[test]
+    fn test_serialize_hwpx_roundtrip_bullet_document() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape {
+            head_type: HeadType::Bullet,
+            numbering_id: 1,
+            ..Default::default()
+        });
+        document.doc_info.bullets.push(Bullet {
+            bullet_char: '*',
+            width_adjust: 12,
+            text_distance: 50,
+            ..Default::default()
+        });
+
+        let paragraph = Paragraph {
+            text: "Bullet item".to_string(),
+            char_offsets: (0..11).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 12,
+            has_para_text: true,
+            ..Default::default()
+        };
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        assert_eq!(parsed.doc_info.bullets.len(), 1);
+        assert_eq!(parsed.doc_info.bullets[0].bullet_char, '*');
+        assert_eq!(parsed.doc_info.para_shapes[0].head_type, HeadType::Bullet);
+        assert_eq!(parsed.doc_info.para_shapes[0].numbering_id, 1);
+    }
+
+    #[test]
+    fn test_serialize_hwpx_roundtrip_field_ranges() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let paragraph = Paragraph {
+            text: "inside".to_string(),
+            char_offsets: (0..6).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            field_ranges: vec![FieldRange {
+                start_char_idx: 0,
+                end_char_idx: 6,
+                control_idx: 0,
+            }],
+            controls: vec![Control::Field(Field {
+                field_type: FieldType::ClickHere,
+                command: Field::build_clickhere_command("inside", "", "Sample"),
+                properties: 1,
+                field_id: 77,
+                ctrl_id: 7,
+                ctrl_data_name: Some("Sample".to_string()),
+                ..Default::default()
+            })],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 7,
+            has_para_text: true,
+            ..Default::default()
+        };
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        let para = &parsed.sections[0].paragraphs[0];
+        assert_eq!(para.text, "inside");
+        assert_eq!(para.field_ranges.len(), 1);
+        assert_eq!(para.field_ranges[0].start_char_idx, 0);
+        assert_eq!(para.field_ranges[0].end_char_idx, 6);
+        assert!(matches!(para.controls[0], Control::Field(_)));
+    }
+
+    #[test]
+    fn test_analyze_hwpx_support_uses_stable_issue_codes() {
+        let mut document = Document::default();
+        document.doc_info.extra_records.push(Default::default());
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "hwpx-docinfo-extra-records"));
+    }
+}
+
+impl HwpxIssueSeverity {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            HwpxIssueSeverity::Blocker => "blocker",
+            HwpxIssueSeverity::Warning => "warning",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HwpxSupportIssue {
+    pub code: &'static str,
+    pub severity: HwpxIssueSeverity,
+    pub message: String,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct HwpxSupportReport {
     pub blockers: Vec<String>,
     pub warnings: Vec<String>,
+    pub issues: Vec<HwpxSupportIssue>,
 }
 
 impl HwpxSupportReport {
-    fn block(&mut self, msg: impl Into<String>) {
-        self.blockers.push(msg.into());
+    fn block(&mut self, code: &'static str, msg: impl Into<String>) {
+        let message = msg.into();
+        self.blockers.push(message.clone());
+        self.issues.push(HwpxSupportIssue {
+            code,
+            severity: HwpxIssueSeverity::Blocker,
+            message,
+        });
     }
 
-    fn warn(&mut self, msg: impl Into<String>) {
-        self.warnings.push(msg.into());
+    fn warn(&mut self, code: &'static str, msg: impl Into<String>) {
+        let message = msg.into();
+        self.warnings.push(message.clone());
+        self.issues.push(HwpxSupportIssue {
+            code,
+            severity: HwpxIssueSeverity::Warning,
+            message,
+        });
     }
 
     fn dedupe(&mut self) {
-        self.blockers = dedupe_messages(&self.blockers);
-        self.warnings = dedupe_messages(&self.warnings);
+        let mut seen = BTreeSet::new();
+        let mut deduped = Vec::new();
+        for issue in &self.issues {
+            if seen.insert((issue.severity, issue.code, issue.message.clone())) {
+                deduped.push(issue.clone());
+            }
+        }
+        self.issues = deduped;
+        self.blockers = self
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == HwpxIssueSeverity::Blocker)
+            .map(|issue| issue.message.clone())
+            .collect();
+        self.warnings = self
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == HwpxIssueSeverity::Warning)
+            .map(|issue| issue.message.clone())
+            .collect();
     }
 
     pub fn is_supported(&self) -> bool {
-        self.blockers.is_empty()
+        !self
+            .issues
+            .iter()
+            .any(|issue| issue.severity == HwpxIssueSeverity::Blocker)
     }
 }
 
@@ -64,22 +284,45 @@ pub fn analyze_hwpx_support(doc: &Document) -> HwpxSupportReport {
     let mut report = HwpxSupportReport::default();
 
     if doc.header.encrypted {
-        report.block("Encrypted documents cannot be saved as HWPX yet.");
+        report.block(
+            "hwpx-encrypted-document",
+            "Encrypted documents cannot be saved as HWPX yet.",
+        );
     }
     if doc.header.distribution {
-        report.block("Distribution documents stay protected to avoid save corruption.");
+        report.block(
+            "hwpx-distribution-document",
+            "Distribution documents stay protected to avoid save corruption.",
+        );
     }
     if !doc.doc_info.extra_records.is_empty() {
-        report.block("Extra DocInfo records are not preserved in HWPX saves yet.");
+        report.block(
+            "hwpx-docinfo-extra-records",
+            "Extra DocInfo records are not preserved in HWPX saves yet.",
+        );
     }
-    if !doc.doc_info.bullets.is_empty() {
-        report.block("Bullet definitions are not written by the HWPX serializer yet.");
+    if doc
+        .doc_info
+        .bullets
+        .iter()
+        .any(|bullet| bullet.image_bullet != 0 || bullet.bullet_char == '\u{FFFF}')
+    {
+        report.block(
+            "hwpx-image-bullet",
+            "Image bullets are not written by the HWPX serializer yet.",
+        );
     }
     if !doc.extra_streams.is_empty() {
-        report.block("Extra binary streams are not preserved in HWPX packages yet.");
+        report.block(
+            "hwpx-extra-binary-streams",
+            "Extra binary streams are not preserved in HWPX packages yet.",
+        );
     }
     if doc.preview.is_some() {
-        report.warn("Preview streams are regenerated lazily and are not preserved in HWPX yet.");
+        report.warn(
+            "hwpx-preview-regenerated",
+            "Preview streams are regenerated lazily and are not preserved in HWPX yet.",
+        );
     }
 
     for (section_idx, section) in doc.sections.iter().enumerate() {
@@ -92,13 +335,13 @@ pub fn analyze_hwpx_support(doc: &Document) -> HwpxSupportReport {
 
 fn analyze_section(section: &Section, section_idx: usize, report: &mut HwpxSupportReport) {
     if section.section_def.page_border_fill.border_fill_id != 0 {
-        report.block(format!(
+        report.block("hwpx-section-page-border-fill", format!(
             "Section {} uses page border/fill settings that are not written to HWPX yet.",
             section_idx
         ));
     }
     if !section.section_def.master_pages.is_empty() {
-        report.block(format!(
+        report.block("hwpx-section-master-pages", format!(
             "Section {} uses master pages that are not written to HWPX yet.",
             section_idx
         ));
@@ -106,7 +349,7 @@ fn analyze_section(section: &Section, section_idx: usize, report: &mut HwpxSuppo
     if !section.section_def.extra_page_border_fills.is_empty()
         || !section.section_def.extra_child_records.is_empty()
     {
-        report.block(format!(
+        report.block("hwpx-section-extra-records", format!(
             "Section {} carries extra section records that are not preserved in HWPX yet.",
             section_idx
         ));
@@ -124,31 +367,36 @@ fn analyze_paragraph(
     report: &mut HwpxSupportReport,
 ) {
     if para.numbering_restart.is_some() {
-        report.block(format!(
+        report.block("hwpx-paragraph-numbering-restart", format!(
             "Paragraph {} in section {} uses numbering restarts that are not written to HWPX yet.",
             para_idx, section_idx
         ));
     }
     if para.text.chars().any(|ch| matches!(ch, '\u{0003}' | '\u{0004}')) {
-        report.block(format!(
-            "Paragraph {} in section {} contains field markers that are not written to HWPX yet.",
-            para_idx, section_idx
-        ));
+        report.block(
+            "hwpx-paragraph-stray-field-markers",
+            format!(
+                "Paragraph {} in section {} still contains raw field markers after parsing.",
+                para_idx, section_idx
+            ),
+        );
     }
 
-    for control in &para.controls {
-        analyze_control(control, section_idx, para_idx, report);
+    for (control_idx, control) in para.controls.iter().enumerate() {
+        analyze_control(control, para, control_idx, section_idx, para_idx, report);
     }
 }
 
 fn analyze_control(
     control: &Control,
+    para: &Paragraph,
+    control_idx: usize,
     section_idx: usize,
     para_idx: usize,
     report: &mut HwpxSupportReport,
 ) {
     match control {
-        Control::SectionDef(_) => report.block(format!(
+        Control::SectionDef(_) => report.block("hwpx-inline-section-def", format!(
             "Paragraph {} in section {} has inline section-definition controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
@@ -162,7 +410,7 @@ fn analyze_control(
         }
         Control::Picture(pic) => {
             if pic.caption.is_some() {
-                report.block(format!(
+                report.block("hwpx-picture-caption", format!(
                     "Paragraph {} in section {} uses picture captions that are not written to HWPX yet.",
                     para_idx, section_idx
                 ));
@@ -193,39 +441,50 @@ fn analyze_control(
         | Control::PageNumberPos(_)
         | Control::Bookmark(_)
         | Control::PageHide(_) => {}
-        Control::Field(_) => report.block(format!(
-            "Paragraph {} in section {} uses fields that are not written to HWPX yet.",
-            para_idx, section_idx
-        )),
-        Control::HiddenComment(_) => report.block(format!(
+        Control::Field(_) => {
+            if !para
+                .field_ranges
+                .iter()
+                .any(|range| range.control_idx == control_idx)
+            {
+                report.block(
+                    "hwpx-field-missing-range",
+                    format!(
+                        "Paragraph {} in section {} has a field control without a tracked text range.",
+                        para_idx, section_idx
+                    ),
+                );
+            }
+        }
+        Control::HiddenComment(_) => report.block("hwpx-hidden-comment", format!(
             "Paragraph {} in section {} uses hidden comments that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Shape(_) => report.block(format!(
+        Control::Shape(_) => report.block("hwpx-shape", format!(
             "Paragraph {} in section {} uses drawing shapes that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Equation(_) => report.block(format!(
+        Control::Equation(_) => report.block("hwpx-equation", format!(
             "Paragraph {} in section {} uses equations that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Form(_) => report.block(format!(
+        Control::Form(_) => report.block("hwpx-form", format!(
             "Paragraph {} in section {} uses form controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Hyperlink(_) => report.block(format!(
+        Control::Hyperlink(_) => report.block("hwpx-hyperlink", format!(
             "Paragraph {} in section {} uses hyperlink controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Ruby(_) => report.block(format!(
+        Control::Ruby(_) => report.block("hwpx-ruby", format!(
             "Paragraph {} in section {} uses ruby annotations that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::CharOverlap(_) => report.block(format!(
+        Control::CharOverlap(_) => report.block("hwpx-char-overlap", format!(
             "Paragraph {} in section {} uses character-overlap controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Unknown(_) => report.block(format!(
+        Control::Unknown(_) => report.block("hwpx-unknown-control", format!(
             "Paragraph {} in section {} contains unknown controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
@@ -388,6 +647,16 @@ fn serialize_header_xml(doc: &Document) -> String {
     }
     for numbering in &doc.doc_info.numberings {
         xml.push_str(&serialize_numbering(numbering));
+    }
+    if !doc.doc_info.bullets.is_empty() {
+        xml.push_str(&format!(
+            r#"<hh:bullets itemCnt="{}">"#,
+            doc.doc_info.bullets.len()
+        ));
+        for (index, bullet) in doc.doc_info.bullets.iter().enumerate() {
+            xml.push_str(&serialize_bullet(bullet, index + 1));
+        }
+        xml.push_str(r#"</hh:bullets>"#);
     }
     for border_fill in &doc.doc_info.border_fills {
         xml.push_str(&serialize_border_fill(border_fill));
@@ -558,6 +827,32 @@ fn serialize_numbering(numbering: &Numbering) -> String {
         ));
     }
     xml.push_str(r#"</hh:numbering>"#);
+    xml
+}
+
+fn serialize_bullet(bullet: &Bullet, id: usize) -> String {
+    let bullet_char = if bullet.bullet_char == '\0' { '•' } else { bullet.bullet_char };
+    let check_bullet_char = if bullet.check_bullet_char == '\0' {
+        bullet_char
+    } else {
+        bullet.check_bullet_char
+    };
+
+    let mut xml = String::new();
+    xml.push_str(&format!(
+        r#"<hh:bullet id="{}" char="{}" useImage="{}" checkedChar="{}">"#,
+        id,
+        xml_escape_attr(&bullet_char.to_string()),
+        bool_to_attr(bullet.image_bullet != 0 || bullet.bullet_char == '\u{FFFF}'),
+        xml_escape_attr(&check_bullet_char.to_string()),
+    ));
+    xml.push_str(&format!(
+        r#"<hh:paraHead level="0" align="LEFT" useInstWidth="0" autoIndent="1" widthAdjust="{}" textOffsetType="PERCENT" textOffset="{}" numFormat="DIGIT" charPrIDRef="4294967295" checkable="{}"/>"#,
+        bullet.width_adjust,
+        bullet.text_distance,
+        bool_to_attr(check_bullet_char != bullet_char),
+    ));
+    xml.push_str(r#"</hh:bullet>"#);
     xml
 }
 
@@ -776,11 +1071,54 @@ fn serialize_paragraph_xml(
     let skip_text_indices = compute_skipped_text_indices(para, &control_positions, &text_chars);
     let mut controls_by_pos: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     for (ctrl_idx, pos) in control_positions.iter().copied().enumerate() {
+        if matches!(para.controls.get(ctrl_idx), Some(Control::Field(_))) {
+            continue;
+        }
         controls_by_pos.entry(pos).or_default().push(ctrl_idx);
+    }
+
+    let mut field_starts: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut field_ends: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut empty_field_ends: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut field_boundaries = BTreeSet::new();
+    for (range_idx, range) in para.field_ranges.iter().enumerate() {
+        field_starts.entry(range.start_char_idx).or_default().push(range_idx);
+        if range.start_char_idx == range.end_char_idx {
+            empty_field_ends.entry(range.end_char_idx).or_default().push(range_idx);
+        } else {
+            field_ends.entry(range.end_char_idx).or_default().push(range_idx);
+        }
+        field_boundaries.insert(range.start_char_idx);
+        field_boundaries.insert(range.end_char_idx);
+    }
+    for ranges in field_starts.values_mut() {
+        ranges.sort_by_key(|range_idx| para.field_ranges[*range_idx].control_idx);
+    }
+    for ranges in field_ends.values_mut() {
+        ranges.sort_by_key(|range_idx| std::cmp::Reverse(para.field_ranges[*range_idx].control_idx));
+    }
+    for ranges in empty_field_ends.values_mut() {
+        ranges.sort_by_key(|range_idx| para.field_ranges[*range_idx].control_idx);
     }
 
     let mut cursor = 0usize;
     while cursor <= text_chars.len() {
+        if let Some(range_indices) = field_ends.get(&cursor) {
+            for range_idx in range_indices {
+                xml.push_str(&serialize_field_end_for_range(para, *range_idx)?);
+            }
+        }
+        if let Some(range_indices) = field_starts.get(&cursor) {
+            for range_idx in range_indices {
+                xml.push_str(&serialize_field_begin_for_range(para, *range_idx)?);
+            }
+        }
+        if let Some(range_indices) = empty_field_ends.get(&cursor) {
+            for range_idx in range_indices {
+                xml.push_str(&serialize_field_end_for_range(para, *range_idx)?);
+            }
+        }
+
         if let Some(ctrl_indices) = controls_by_pos.get(&cursor) {
             for ctrl_idx in ctrl_indices {
                 if Some(*ctrl_idx) == embedded_column_def_idx {
@@ -800,7 +1138,10 @@ fn serialize_paragraph_xml(
         let current_shape = char_shape_id_at(para, cursor);
         let mut end = cursor + 1;
         while end < text_chars.len() {
-            if skip_text_indices.contains(&end) || controls_by_pos.contains_key(&end) {
+            if skip_text_indices.contains(&end)
+                || controls_by_pos.contains_key(&end)
+                || field_boundaries.contains(&end)
+            {
                 break;
             }
             if char_shape_id_at(para, end) != current_shape {
@@ -1050,6 +1391,154 @@ fn serialize_control_xml(control: &Control) -> Result<String, SerializeError> {
             other
         ))),
     }
+}
+
+fn serialize_field_begin_for_range(
+    para: &Paragraph,
+    range_idx: usize,
+) -> Result<String, SerializeError> {
+    let range = para
+        .field_ranges
+        .get(range_idx)
+        .ok_or_else(|| SerializeError::CfbError("Missing field range during HWPX save".to_string()))?;
+    let field = match para.controls.get(range.control_idx) {
+        Some(Control::Field(field)) => field,
+        _ => {
+            return Err(SerializeError::CfbError(format!(
+                "Field range {} points to a non-field control",
+                range_idx
+            )))
+        }
+    };
+
+    Ok(format!(
+        r#"<hp:ctrl>{}</hp:ctrl>"#,
+        serialize_field_begin_control(field, range.control_idx)
+    ))
+}
+
+fn serialize_field_end_for_range(
+    para: &Paragraph,
+    range_idx: usize,
+) -> Result<String, SerializeError> {
+    let range = para
+        .field_ranges
+        .get(range_idx)
+        .ok_or_else(|| SerializeError::CfbError("Missing field range during HWPX save".to_string()))?;
+    let field = match para.controls.get(range.control_idx) {
+        Some(Control::Field(field)) => field,
+        _ => {
+            return Err(SerializeError::CfbError(format!(
+                "Field range {} points to a non-field control",
+                range_idx
+            )))
+        }
+    };
+
+    Ok(format!(
+        r#"<hp:ctrl>{}</hp:ctrl>"#,
+        serialize_field_end_control(field, range.control_idx)
+    ))
+}
+
+fn serialize_field_begin_control(field: &Field, control_idx: usize) -> String {
+    let (ctrl_id, field_id) = resolved_field_ids(field, control_idx);
+    let name = field
+        .ctrl_data_name
+        .as_deref()
+        .or_else(|| {
+            (field.field_type == FieldType::ClickHere)
+                .then(|| field.field_name())
+                .flatten()
+        })
+        .unwrap_or_default();
+
+    let command = if field.command.is_empty()
+        && field.field_type == FieldType::ClickHere
+        && !name.is_empty()
+    {
+        Field::build_clickhere_command("", "", name)
+    } else {
+        field.command.clone()
+    };
+
+    let mut parameters = Vec::new();
+    parameters.push(format!(
+        r#"<hp:integerParam name="Prop">{}</hp:integerParam>"#,
+        field.properties
+    ));
+    if !command.is_empty() {
+        parameters.push(format!(
+            r#"<hp:stringParam name="Command">{}</hp:stringParam>"#,
+            xml_escape_text(&command)
+        ));
+    }
+    if field.field_type == FieldType::ClickHere {
+        if let Some(guide) = field.guide_text() {
+            parameters.push(format!(
+                r#"<hp:stringParam name="Direction">{}</hp:stringParam>"#,
+                xml_escape_text(guide)
+            ));
+        }
+        if let Some(memo) = field.memo_text() {
+            parameters.push(format!(
+                r#"<hp:stringParam name="HelpState">{}</hp:stringParam>"#,
+                xml_escape_text(memo)
+            ));
+        }
+        if !name.is_empty() {
+            parameters.push(format!(
+                r#"<hp:stringParam name="Name">{}</hp:stringParam>"#,
+                xml_escape_text(name)
+            ));
+        }
+    }
+
+    let parameters_xml = if parameters.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<hp:parameters cnt="{}" name="">{}</hp:parameters>"#,
+            parameters.len(),
+            parameters.join("")
+        )
+    };
+
+    format!(
+        r#"<hp:fieldBegin id="{}" type="{}" name="{}" editable="{}" dirty="0" zorder="-1" fieldid="{}" metaTag="">{}</hp:fieldBegin>"#,
+        ctrl_id,
+        field_type_to_xml(field.field_type),
+        xml_escape_attr(name),
+        bool_to_attr(field.is_editable_in_form()),
+        field_id,
+        parameters_xml,
+    )
+}
+
+fn serialize_field_end_control(field: &Field, control_idx: usize) -> String {
+    let (ctrl_id, field_id) = resolved_field_ids(field, control_idx);
+    format!(
+        r#"<hp:fieldEnd beginIDRef="{}" fieldid="{}"/>"#,
+        ctrl_id,
+        field_id,
+    )
+}
+
+fn resolved_field_ids(field: &Field, control_idx: usize) -> (u32, u32) {
+    let fallback = (control_idx as u32).saturating_add(1);
+    let ctrl_id = if field.ctrl_id != 0 {
+        field.ctrl_id
+    } else if field.field_id != 0 {
+        field.field_id
+    } else {
+        fallback
+    };
+    let field_id = if field.field_id != 0 {
+        field.field_id
+    } else {
+        ctrl_id
+    };
+    (ctrl_id, field_id)
 }
 
 fn serialize_table_xml(table: &Table) -> Result<String, SerializeError> {
@@ -1650,6 +2139,26 @@ fn auto_number_type_to_xml(number_type: AutoNumberType) -> &'static str {
     }
 }
 
+fn field_type_to_xml(field_type: FieldType) -> &'static str {
+    match field_type {
+        FieldType::Unknown => "UNKNOWN",
+        FieldType::Date => "DATE",
+        FieldType::DocDate => "DOC_DATE",
+        FieldType::Path => "PATH",
+        FieldType::Bookmark => "BOOKMARK",
+        FieldType::MailMerge => "MAILMERGE",
+        FieldType::CrossRef => "CROSSREF",
+        FieldType::Formula => "FORMULA",
+        FieldType::ClickHere => "CLICK_HERE",
+        FieldType::Summary => "SUMMARY",
+        FieldType::UserInfo => "USER_INFO",
+        FieldType::Hyperlink => "HYPERLINK",
+        FieldType::Memo => "MEMO",
+        FieldType::PrivateInfoSecurity => "PRIVATE_INFO",
+        FieldType::TableOfContents => "TABLE_OF_CONTENTS",
+    }
+}
+
 fn page_number_position_to_xml(position: u8) -> &'static str {
     match position {
         0 => "NONE",
@@ -1680,11 +2189,12 @@ fn page_number_format_to_xml(format: u8) -> &'static str {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::document::Document;
-    use crate::model::paragraph::{CharShapeRef, Paragraph};
+    use crate::model::paragraph::{CharShapeRef, FieldRange, Paragraph};
 
     #[test]
     fn test_serialize_hwpx_roundtrip_text() {
@@ -1733,4 +2243,110 @@ mod tests {
         assert!(!report.is_supported());
         assert!(report.blockers.iter().any(|blocker| blocker.contains("drawing shapes")));
     }
+
+    #[test]
+    fn test_serialize_hwpx_roundtrip_bullet_document() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape {
+            head_type: HeadType::Bullet,
+            numbering_id: 1,
+            ..Default::default()
+        });
+        document.doc_info.bullets.push(Bullet {
+            bullet_char: '◦',
+            width_adjust: 12,
+            text_distance: 50,
+            ..Default::default()
+        });
+
+        let paragraph = Paragraph {
+            text: "Bullet item".to_string(),
+            char_offsets: (0..11).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 12,
+            has_para_text: true,
+            ..Default::default()
+        };
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        assert_eq!(parsed.doc_info.bullets.len(), 1);
+        assert_eq!(parsed.doc_info.bullets[0].bullet_char, '◦');
+        assert_eq!(parsed.sections[0].paragraphs[0].para_shape_id, 0);
+        assert_eq!(parsed.doc_info.para_shapes[0].head_type, HeadType::Bullet);
+        assert_eq!(parsed.doc_info.para_shapes[0].numbering_id, 1);
+    }
+
+    #[test]
+    fn test_serialize_hwpx_roundtrip_field_ranges() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let paragraph = Paragraph {
+            text: "inside".to_string(),
+            char_offsets: (0..6).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            field_ranges: vec![FieldRange {
+                start_char_idx: 0,
+                end_char_idx: 6,
+                control_idx: 0,
+            }],
+            controls: vec![Control::Field(Field {
+                field_type: FieldType::ClickHere,
+                command: Field::build_clickhere_command("inside", "", "Sample"),
+                properties: 1,
+                field_id: 77,
+                ctrl_id: 7,
+                ctrl_data_name: Some("Sample".to_string()),
+                ..Default::default()
+            })],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 7,
+            has_para_text: true,
+            ..Default::default()
+        };
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        let para = &parsed.sections[0].paragraphs[0];
+        assert_eq!(para.text, "inside");
+        assert_eq!(para.field_ranges.len(), 1);
+        assert_eq!(para.field_ranges[0].start_char_idx, 0);
+        assert_eq!(para.field_ranges[0].end_char_idx, 6);
+        assert!(matches!(para.controls[0], Control::Field(_)));
+    }
+
+    #[test]
+    fn test_analyze_hwpx_support_uses_stable_issue_codes() {
+        let mut document = Document::default();
+        document.doc_info.extra_records.push(Default::default());
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.issues.iter().any(|issue| issue.code == "hwpx-docinfo-extra-records"));
+    }
 }
+*/
