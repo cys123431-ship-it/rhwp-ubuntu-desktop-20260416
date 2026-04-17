@@ -9,7 +9,7 @@ Phase corpus manifests for Ubuntu v1 shipment and later Hancom-grade compatibili
 - `phase1-protected.tsv`
   Risky documents that must open in `protected-view` with stable issue codes.
 - `phase2-extended.tsv`
-  Broader exploratory corpus for later promotion work.
+  Broader exploratory corpus for later promotion work and compatibility report artifacts.
 
 ## TSV format
 
@@ -27,7 +27,7 @@ Valid values:
 
 - `expected_edit_mode`: `editable-safe`, `protected-view`
 - `expected_save_format`: `hwp`, `hwpx`, `unknown`
-- `required_issue_codes`: comma-separated stable compatibility codes
+- `required_issue_codes`: comma-separated stable compatibility codes, or `none`
 - `roundtrip_mode`: `save-reparse`, `none`
 
 Relative paths are resolved from the manifest directory.
@@ -44,4 +44,10 @@ Validate a manifest:
 
 ```powershell
 cargo run --bin rhwp -- compat-corpus compatibility-corpus/phase1-supported.tsv
+```
+
+Generate a structured report for one document:
+
+```powershell
+cargo run --bin rhwp -- compat-report compatibility-corpus/fixtures/phase1-basic-text.hwpx
 ```

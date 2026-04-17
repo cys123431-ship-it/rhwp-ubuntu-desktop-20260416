@@ -14,7 +14,7 @@ export interface DocumentInfo {
 /** WASM getPageInfo() 반환 타입 */
 export type DocumentFormat = 'hwp' | 'hwpx' | 'unknown';
 export type DocumentEditMode = 'editable-safe' | 'protected-view';
-export type CompatibilitySeverity = 'blocker' | 'warning';
+export type CompatibilitySeverity = 'blocker' | 'warning' | 'info';
 
 export interface CompatibilityIssue {
   code: string;

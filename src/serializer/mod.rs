@@ -14,7 +14,14 @@ pub mod mini_cfb;
 pub mod record_writer;
 
 pub use cfb_writer::{serialize_hwp, SerializeError};
-pub use hwpx_writer::{analyze_hwpx_support, serialize_hwpx, HwpxSupportReport};
+pub use hwpx_writer::{
+    analyze_hwpx_support,
+    analyze_hwpx_support_with_context,
+    serialize_hwpx,
+    serialize_hwpx_with_context,
+    HwpxPreservationContext,
+    HwpxSupportReport,
+};
 
 use crate::model::document::Document;
 

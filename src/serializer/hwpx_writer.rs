@@ -21,6 +21,7 @@ use crate::model::style::{
     HeadType, ImageFillMode, LineSpacingType, Numbering, ParaShape, TabDef, UnderlineType,
 };
 use crate::model::table::{Cell, Table, TablePageBreak, VerticalAlign};
+use crate::parser::hwpx::reader::{HwpxPackageEntryRole, HwpxPackageSnapshot};
 use crate::document_core::helpers::find_control_text_positions;
 
 use super::cfb_writer::SerializeError;
@@ -29,6 +30,21 @@ use super::cfb_writer::SerializeError;
 pub enum HwpxIssueSeverity {
     Blocker,
     Warning,
+    Info,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HwpxIssueScope {
+    Document,
+    DocInfo,
+    Section(usize),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HwpxPreservationContext<'a> {
+    pub snapshot: Option<&'a HwpxPackageSnapshot>,
+    pub dirty_sections: Option<&'a [bool]>,
+    pub doc_info_dirty: bool,
 }
 
 #[cfg(test)]
@@ -192,6 +208,115 @@ mod tests_clean {
             .iter()
             .any(|issue| issue.code == "hwpx-docinfo-extra-records"));
     }
+
+    #[test]
+    fn test_preservation_context_downgrades_clean_section_metadata_blockers() {
+        let mut document = Document::default();
+        document.sections.push(Section {
+            section_def: SectionDef {
+                extra_child_records: vec![Default::default()],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let snapshot = HwpxPackageSnapshot {
+            entries: vec![crate::parser::hwpx::reader::HwpxPackageEntrySnapshot {
+                path: "Contents/section0.xml".to_string(),
+                bytes: b"<hp:section/>".to_vec(),
+                role: HwpxPackageEntryRole::Section(0),
+                replaceable: true,
+            }],
+        };
+
+        let clean_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[false]),
+                doc_info_dirty: false,
+            },
+        );
+        assert!(clean_report.is_supported());
+        assert!(clean_report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "hwpx-section-extra-records" && issue.severity == HwpxIssueSeverity::Warning));
+
+        let dirty_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[true]),
+                doc_info_dirty: false,
+            },
+        );
+        assert!(!dirty_report.is_supported());
+        assert!(dirty_report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "hwpx-section-extra-records" && issue.severity == HwpxIssueSeverity::Blocker));
+    }
+
+    #[test]
+    fn test_serialize_hwpx_with_context_preserves_untouched_entries() {
+        use std::io::Write;
+        use zip::ZipWriter;
+
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+        document.sections.push(Section {
+            paragraphs: vec![Paragraph {
+                text: "Snapshot".to_string(),
+                char_offsets: (0..8).collect(),
+                char_shapes: vec![CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: 0,
+                }],
+                para_shape_id: 0,
+                style_id: 0,
+                char_count: 8,
+                has_para_text: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        let base = serialize_hwpx(&document).expect("serialize hwpx");
+        let base_snapshot = HwpxPackageSnapshot::from_bytes(&base).expect("snapshot");
+        let mut out = Cursor::new(Vec::<u8>::new());
+        {
+            let mut writer = ZipWriter::new(&mut out);
+            let options = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+
+            for entry in &base_snapshot.entries {
+                writer.start_file(&entry.path, options).unwrap();
+                writer.write_all(&entry.bytes).unwrap();
+            }
+            writer.start_file("META-INF/custom.xml", options).unwrap();
+            writer.write_all(b"<custom preserved=\"yes\"/>").unwrap();
+            writer.finish().unwrap();
+        }
+
+        let snapshot = HwpxPackageSnapshot::from_bytes(&out.into_inner()).expect("snapshot");
+        let saved = serialize_hwpx_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[false]),
+                doc_info_dirty: false,
+            },
+        )
+        .expect("save with snapshot");
+        let saved_snapshot = HwpxPackageSnapshot::from_bytes(&saved).expect("saved snapshot");
+        let extra = saved_snapshot
+            .entry("META-INF/custom.xml")
+            .expect("preserved extra entry");
+        assert_eq!(extra.bytes, b"<custom preserved=\"yes\"/>");
+    }
 }
 
 impl HwpxIssueSeverity {
@@ -199,6 +324,7 @@ impl HwpxIssueSeverity {
         match self {
             HwpxIssueSeverity::Blocker => "blocker",
             HwpxIssueSeverity::Warning => "warning",
+            HwpxIssueSeverity::Info => "info",
         }
     }
 }
@@ -207,6 +333,7 @@ impl HwpxIssueSeverity {
 pub struct HwpxSupportIssue {
     pub code: &'static str,
     pub severity: HwpxIssueSeverity,
+    pub scope: HwpxIssueScope,
     pub message: String,
 }
 
@@ -214,35 +341,44 @@ pub struct HwpxSupportIssue {
 pub struct HwpxSupportReport {
     pub blockers: Vec<String>,
     pub warnings: Vec<String>,
+    pub infos: Vec<String>,
     pub issues: Vec<HwpxSupportIssue>,
 }
 
 impl HwpxSupportReport {
-    fn block(&mut self, code: &'static str, msg: impl Into<String>) {
+    fn push(
+        &mut self,
+        scope: HwpxIssueScope,
+        severity: HwpxIssueSeverity,
+        code: &'static str,
+        msg: impl Into<String>,
+    ) {
         let message = msg.into();
-        self.blockers.push(message.clone());
         self.issues.push(HwpxSupportIssue {
             code,
-            severity: HwpxIssueSeverity::Blocker,
+            severity,
+            scope,
             message,
         });
     }
 
-    fn warn(&mut self, code: &'static str, msg: impl Into<String>) {
-        let message = msg.into();
-        self.warnings.push(message.clone());
-        self.issues.push(HwpxSupportIssue {
-            code,
-            severity: HwpxIssueSeverity::Warning,
-            message,
-        });
+    fn block(&mut self, scope: HwpxIssueScope, code: &'static str, msg: impl Into<String>) {
+        self.push(scope, HwpxIssueSeverity::Blocker, code, msg);
+    }
+
+    fn warn(&mut self, scope: HwpxIssueScope, code: &'static str, msg: impl Into<String>) {
+        self.push(scope, HwpxIssueSeverity::Warning, code, msg);
+    }
+
+    fn info(&mut self, scope: HwpxIssueScope, code: &'static str, msg: impl Into<String>) {
+        self.push(scope, HwpxIssueSeverity::Info, code, msg);
     }
 
     fn dedupe(&mut self) {
         let mut seen = BTreeSet::new();
         let mut deduped = Vec::new();
         for issue in &self.issues {
-            if seen.insert((issue.severity, issue.code, issue.message.clone())) {
+            if seen.insert((issue.severity, issue.scope, issue.code, issue.message.clone())) {
                 deduped.push(issue.clone());
             }
         }
@@ -259,6 +395,12 @@ impl HwpxSupportReport {
             .filter(|issue| issue.severity == HwpxIssueSeverity::Warning)
             .map(|issue| issue.message.clone())
             .collect();
+        self.infos = self
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == HwpxIssueSeverity::Info)
+            .map(|issue| issue.message.clone())
+            .collect();
     }
 
     pub fn is_supported(&self) -> bool {
@@ -269,34 +411,26 @@ impl HwpxSupportReport {
     }
 }
 
-fn dedupe_messages(messages: &[String]) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut deduped = Vec::new();
-    for message in messages {
-        if seen.insert(message.clone()) {
-            deduped.push(message.clone());
-        }
-    }
-    deduped
-}
-
 pub fn analyze_hwpx_support(doc: &Document) -> HwpxSupportReport {
     let mut report = HwpxSupportReport::default();
 
     if doc.header.encrypted {
         report.block(
+            HwpxIssueScope::Document,
             "hwpx-encrypted-document",
             "Encrypted documents cannot be saved as HWPX yet.",
         );
     }
     if doc.header.distribution {
         report.block(
+            HwpxIssueScope::Document,
             "hwpx-distribution-document",
             "Distribution documents stay protected to avoid save corruption.",
         );
     }
     if !doc.doc_info.extra_records.is_empty() {
         report.block(
+            HwpxIssueScope::DocInfo,
             "hwpx-docinfo-extra-records",
             "Extra DocInfo records are not preserved in HWPX saves yet.",
         );
@@ -308,18 +442,21 @@ pub fn analyze_hwpx_support(doc: &Document) -> HwpxSupportReport {
         .any(|bullet| bullet.image_bullet != 0 || bullet.bullet_char == '\u{FFFF}')
     {
         report.block(
+            HwpxIssueScope::DocInfo,
             "hwpx-image-bullet",
             "Image bullets are not written by the HWPX serializer yet.",
         );
     }
     if !doc.extra_streams.is_empty() {
         report.block(
+            HwpxIssueScope::Document,
             "hwpx-extra-binary-streams",
             "Extra binary streams are not preserved in HWPX packages yet.",
         );
     }
     if doc.preview.is_some() {
         report.warn(
+            HwpxIssueScope::Document,
             "hwpx-preview-regenerated",
             "Preview streams are regenerated lazily and are not preserved in HWPX yet.",
         );
@@ -333,15 +470,72 @@ pub fn analyze_hwpx_support(doc: &Document) -> HwpxSupportReport {
     report
 }
 
+pub fn analyze_hwpx_support_with_context(
+    doc: &Document,
+    context: HwpxPreservationContext<'_>,
+) -> HwpxSupportReport {
+    let mut report = analyze_hwpx_support(doc);
+    if context.snapshot.is_none() {
+        return report;
+    }
+
+    for issue in &mut report.issues {
+        issue.severity = classify_issue_severity(issue, context);
+    }
+    report.dedupe();
+    report
+}
+
+fn classify_issue_severity(
+    issue: &HwpxSupportIssue,
+    context: HwpxPreservationContext<'_>,
+) -> HwpxIssueSeverity {
+    match issue.code {
+        "hwpx-encrypted-document"
+        | "hwpx-distribution-document"
+        | "hwpx-extra-binary-streams" => HwpxIssueSeverity::Blocker,
+        "hwpx-preview-regenerated" => HwpxIssueSeverity::Info,
+        "hwpx-docinfo-extra-records" | "hwpx-image-bullet" => {
+            if !context.doc_info_dirty {
+                HwpxIssueSeverity::Warning
+            } else {
+                HwpxIssueSeverity::Blocker
+            }
+        }
+        "hwpx-section-page-border-fill"
+        | "hwpx-section-master-pages"
+        | "hwpx-section-extra-records" => {
+            if issue_scope_is_clean(issue.scope, context.dirty_sections) {
+                HwpxIssueSeverity::Warning
+            } else {
+                HwpxIssueSeverity::Blocker
+            }
+        }
+        _ => issue.severity,
+    }
+}
+
+fn issue_scope_is_clean(scope: HwpxIssueScope, dirty_sections: Option<&[bool]>) -> bool {
+    match scope {
+        HwpxIssueScope::Document => false,
+        HwpxIssueScope::DocInfo => false,
+        HwpxIssueScope::Section(section_idx) => dirty_sections
+            .and_then(|sections| sections.get(section_idx))
+            .copied()
+            .map(|dirty| !dirty)
+            .unwrap_or(false),
+    }
+}
+
 fn analyze_section(section: &Section, section_idx: usize, report: &mut HwpxSupportReport) {
     if section.section_def.page_border_fill.border_fill_id != 0 {
-        report.block("hwpx-section-page-border-fill", format!(
+        report.block(HwpxIssueScope::Section(section_idx), "hwpx-section-page-border-fill", format!(
             "Section {} uses page border/fill settings that are not written to HWPX yet.",
             section_idx
         ));
     }
     if !section.section_def.master_pages.is_empty() {
-        report.block("hwpx-section-master-pages", format!(
+        report.block(HwpxIssueScope::Section(section_idx), "hwpx-section-master-pages", format!(
             "Section {} uses master pages that are not written to HWPX yet.",
             section_idx
         ));
@@ -349,7 +543,7 @@ fn analyze_section(section: &Section, section_idx: usize, report: &mut HwpxSuppo
     if !section.section_def.extra_page_border_fills.is_empty()
         || !section.section_def.extra_child_records.is_empty()
     {
-        report.block("hwpx-section-extra-records", format!(
+        report.block(HwpxIssueScope::Section(section_idx), "hwpx-section-extra-records", format!(
             "Section {} carries extra section records that are not preserved in HWPX yet.",
             section_idx
         ));
@@ -367,13 +561,14 @@ fn analyze_paragraph(
     report: &mut HwpxSupportReport,
 ) {
     if para.numbering_restart.is_some() {
-        report.block("hwpx-paragraph-numbering-restart", format!(
+        report.block(HwpxIssueScope::Section(section_idx), "hwpx-paragraph-numbering-restart", format!(
             "Paragraph {} in section {} uses numbering restarts that are not written to HWPX yet.",
             para_idx, section_idx
         ));
     }
     if para.text.chars().any(|ch| matches!(ch, '\u{0003}' | '\u{0004}')) {
         report.block(
+            HwpxIssueScope::Section(section_idx),
             "hwpx-paragraph-stray-field-markers",
             format!(
                 "Paragraph {} in section {} still contains raw field markers after parsing.",
@@ -396,7 +591,7 @@ fn analyze_control(
     report: &mut HwpxSupportReport,
 ) {
     match control {
-        Control::SectionDef(_) => report.block("hwpx-inline-section-def", format!(
+        Control::SectionDef(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-inline-section-def", format!(
             "Paragraph {} in section {} has inline section-definition controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
@@ -410,7 +605,7 @@ fn analyze_control(
         }
         Control::Picture(pic) => {
             if pic.caption.is_some() {
-                report.block("hwpx-picture-caption", format!(
+                report.block(HwpxIssueScope::Section(section_idx), "hwpx-picture-caption", format!(
                     "Paragraph {} in section {} uses picture captions that are not written to HWPX yet.",
                     para_idx, section_idx
                 ));
@@ -448,6 +643,7 @@ fn analyze_control(
                 .any(|range| range.control_idx == control_idx)
             {
                 report.block(
+                    HwpxIssueScope::Section(section_idx),
                     "hwpx-field-missing-range",
                     format!(
                         "Paragraph {} in section {} has a field control without a tracked text range.",
@@ -456,35 +652,35 @@ fn analyze_control(
                 );
             }
         }
-        Control::HiddenComment(_) => report.block("hwpx-hidden-comment", format!(
+        Control::HiddenComment(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-hidden-comment", format!(
             "Paragraph {} in section {} uses hidden comments that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Shape(_) => report.block("hwpx-shape", format!(
+        Control::Shape(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-shape", format!(
             "Paragraph {} in section {} uses drawing shapes that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Equation(_) => report.block("hwpx-equation", format!(
+        Control::Equation(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-equation", format!(
             "Paragraph {} in section {} uses equations that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Form(_) => report.block("hwpx-form", format!(
+        Control::Form(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-form", format!(
             "Paragraph {} in section {} uses form controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Hyperlink(_) => report.block("hwpx-hyperlink", format!(
+        Control::Hyperlink(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-hyperlink", format!(
             "Paragraph {} in section {} uses hyperlink controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Ruby(_) => report.block("hwpx-ruby", format!(
+        Control::Ruby(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-ruby", format!(
             "Paragraph {} in section {} uses ruby annotations that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::CharOverlap(_) => report.block("hwpx-char-overlap", format!(
+        Control::CharOverlap(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-char-overlap", format!(
             "Paragraph {} in section {} uses character-overlap controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Unknown(_) => report.block("hwpx-unknown-control", format!(
+        Control::Unknown(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-unknown-control", format!(
             "Paragraph {} in section {} contains unknown controls that are not written to HWPX yet.",
             para_idx, section_idx
         )),
@@ -492,7 +688,14 @@ fn analyze_control(
 }
 
 pub fn serialize_hwpx(doc: &Document) -> Result<Vec<u8>, SerializeError> {
-    let report = analyze_hwpx_support(doc);
+    serialize_hwpx_with_context(doc, HwpxPreservationContext::default())
+}
+
+pub fn serialize_hwpx_with_context(
+    doc: &Document,
+    context: HwpxPreservationContext<'_>,
+) -> Result<Vec<u8>, SerializeError> {
+    let report = analyze_hwpx_support_with_context(doc, context);
     if !report.is_supported() {
         return Err(SerializeError::CfbError(report.blockers.join(" ")));
     }
@@ -502,70 +705,230 @@ pub fn serialize_hwpx(doc: &Document) -> Result<Vec<u8>, SerializeError> {
         .compression_method(zip::CompressionMethod::Deflated)
         .unix_permissions(0o644);
 
-    write_zip_entry(
-        &mut writer,
-        "Contents/content.hpf",
-        &serialize_content_hpf(doc),
-        options,
-    )?;
-    write_zip_entry(
-        &mut writer,
-        "Contents/header.xml",
-        &serialize_header_xml(doc),
-        options,
-    )?;
+    let section_paths = planned_section_paths(doc, context.snapshot);
+    let bindata_paths = planned_bindata_paths(doc, context.snapshot);
+    let content_xml = serialize_content_hpf(doc, &section_paths, &bindata_paths);
+    let header_xml = serialize_header_xml(doc);
 
-    for (index, section) in doc.sections.iter().enumerate() {
-        let path = format!("Contents/section{}.xml", index);
-        let xml = serialize_section_xml(section)?;
-        write_zip_entry(&mut writer, &path, &xml, options)?;
+    let mut replacements = BTreeMap::new();
+    let header_needs_rewrite = context.snapshot.is_none()
+        || context.doc_info_dirty
+        || context
+            .snapshot
+            .and_then(|snapshot| snapshot.entry("Contents/header.xml"))
+            .is_none();
+    if header_needs_rewrite {
+        replacements.insert("Contents/header.xml".to_string(), header_xml.into_bytes());
     }
 
-    let mut written_bin_paths = BTreeSet::new();
-    for content in &doc.bin_data_content {
-        let path = format!("BinData/image{}.{}", content.id, content.extension);
-        writer
-            .start_file(path.as_str(), options)
-            .map_err(|e| SerializeError::CfbError(e.to_string()))?;
-        writer
-            .write_all(&content.data)
-            .map_err(|e| SerializeError::CfbError(e.to_string()))?;
-        written_bin_paths.insert(path);
+    let content_needs_rewrite = context.snapshot.is_none()
+        || package_paths_changed(context.snapshot, &section_paths, &bindata_paths)
+        || context
+            .snapshot
+            .and_then(|snapshot| snapshot.entry("Contents/content.hpf"))
+            .is_none();
+    if content_needs_rewrite {
+        replacements.insert("Contents/content.hpf".to_string(), content_xml.into_bytes());
     }
 
-    for info in &doc.doc_info.bin_data_list {
-        if let Some(ext) = info.extension.as_ref() {
-            let path = format!("BinData/image{}.{}", info.storage_id, ext);
-            if written_bin_paths.contains(&path) {
-                continue;
-            }
-            writer
-                .start_file(path.as_str(), options)
-                .map_err(|e| SerializeError::CfbError(e.to_string()))?;
+    for (index, path) in section_paths.iter().enumerate() {
+        if section_needs_rewrite(index, path, context) {
+            let section = doc.sections.get(index).cloned().unwrap_or_default();
+            let xml = serialize_section_xml(&section)?;
+            replacements.insert(path.clone(), xml.into_bytes());
         }
     }
 
-    let cursor = writer
+    for (index, path) in bindata_paths.iter().enumerate() {
+        if let Some(content) = doc.bin_data_content.get(index) {
+            if bindata_needs_rewrite(index, path, content.data.as_slice(), context) {
+                replacements.insert(path.clone(), content.data.clone());
+            }
+        } else if context.snapshot.is_none()
+            || context
+                .snapshot
+                .and_then(|snapshot| snapshot.entry(path))
+                .is_none()
+        {
+            replacements.insert(path.clone(), Vec::new());
+        }
+    }
+
+    let mut written_paths = BTreeSet::new();
+    if let Some(snapshot) = context.snapshot {
+        for entry in &snapshot.entries {
+            if should_drop_snapshot_entry(entry, &section_paths, &bindata_paths) {
+                continue;
+            }
+            if let Some(bytes) = replacements.remove(&entry.path) {
+                write_zip_entry_bytes(&mut writer, &entry.path, &bytes, options)?;
+            } else {
+                write_zip_entry_bytes(&mut writer, &entry.path, &entry.bytes, options)?;
+            }
+            written_paths.insert(entry.path.clone());
+        }
+    }
+
+    for (path, bytes) in replacements {
+        if written_paths.insert(path.clone()) {
+            write_zip_entry_bytes(&mut writer, &path, &bytes, options)?;
+        }
+    }
+
+    writer
         .finish()
-        .map_err(|e| SerializeError::CfbError(e.to_string()))?;
-    Ok(cursor.into_inner())
+        .map_err(|e| SerializeError::CfbError(e.to_string()))
+        .map(|cursor| cursor.into_inner())
 }
 
-fn write_zip_entry(
+fn planned_section_paths(
+    doc: &Document,
+    snapshot: Option<&HwpxPackageSnapshot>,
+) -> Vec<String> {
+    let existing_paths = snapshot
+        .map(HwpxPackageSnapshot::section_paths)
+        .unwrap_or_default();
+    let section_count = doc.sections.len().max(1);
+
+    (0..section_count)
+        .map(|index| {
+            existing_paths
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| format!("Contents/section{}.xml", index))
+        })
+        .collect()
+}
+
+fn planned_bindata_paths(
+    doc: &Document,
+    snapshot: Option<&HwpxPackageSnapshot>,
+) -> Vec<String> {
+    let existing_paths = snapshot
+        .map(HwpxPackageSnapshot::bindata_paths)
+        .unwrap_or_default();
+    let count = doc
+        .doc_info
+        .bin_data_list
+        .len()
+        .max(doc.bin_data_content.len());
+
+    (0..count)
+        .map(|index| {
+            existing_paths
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| default_bindata_path(doc, index))
+        })
+        .collect()
+}
+
+fn default_bindata_path(doc: &Document, index: usize) -> String {
+    let (storage_id, extension) = if let Some(info) = doc.doc_info.bin_data_list.get(index) {
+        let ext = info
+            .extension
+            .clone()
+            .or_else(|| {
+                doc.bin_data_content
+                    .iter()
+                    .find(|content| content.id == info.storage_id)
+                    .map(|content| content.extension.clone())
+            })
+            .unwrap_or_else(|| "dat".to_string());
+        (info.storage_id, ext)
+    } else if let Some(content) = doc.bin_data_content.get(index) {
+        (content.id, content.extension.clone())
+    } else {
+        ((index + 1) as u16, "dat".to_string())
+    };
+
+    format!("BinData/image{}.{}", storage_id, extension)
+}
+
+fn package_paths_changed(
+    snapshot: Option<&HwpxPackageSnapshot>,
+    section_paths: &[String],
+    bindata_paths: &[String],
+) -> bool {
+    let Some(snapshot) = snapshot else {
+        return true;
+    };
+    snapshot.section_paths() != section_paths || snapshot.bindata_paths() != bindata_paths
+}
+
+fn section_needs_rewrite(
+    section_idx: usize,
+    path: &str,
+    context: HwpxPreservationContext<'_>,
+) -> bool {
+    if context.snapshot.is_none() {
+        return true;
+    }
+
+    let is_dirty = context
+        .dirty_sections
+        .and_then(|sections| sections.get(section_idx))
+        .copied()
+        .unwrap_or(true);
+    if is_dirty {
+        return true;
+    }
+
+    context
+        .snapshot
+        .and_then(|snapshot| snapshot.entry(path))
+        .is_none()
+}
+
+fn bindata_needs_rewrite(
+    bindata_idx: usize,
+    path: &str,
+    bytes: &[u8],
+    context: HwpxPreservationContext<'_>,
+) -> bool {
+    let Some(snapshot) = context.snapshot else {
+        return true;
+    };
+    let Some(entry) = snapshot.entry(path) else {
+        return true;
+    };
+    match entry.role {
+        HwpxPackageEntryRole::BinData(index) if index == bindata_idx => entry.bytes != bytes,
+        _ => true,
+    }
+}
+
+fn should_drop_snapshot_entry(
+    entry: &crate::parser::hwpx::reader::HwpxPackageEntrySnapshot,
+    section_paths: &[String],
+    bindata_paths: &[String],
+) -> bool {
+    match entry.role {
+        HwpxPackageEntryRole::Section(index) => {
+            section_paths.get(index).map(|path| path != &entry.path).unwrap_or(true)
+        }
+        HwpxPackageEntryRole::BinData(index) => {
+            bindata_paths.get(index).map(|path| path != &entry.path).unwrap_or(true)
+        }
+        _ => false,
+    }
+}
+
+fn write_zip_entry_bytes(
     writer: &mut zip::ZipWriter<Cursor<Vec<u8>>>,
     path: &str,
-    content: &str,
+    content: &[u8],
     options: SimpleFileOptions,
 ) -> Result<(), SerializeError> {
     writer
         .start_file(path, options)
         .map_err(|e| SerializeError::CfbError(e.to_string()))?;
     writer
-        .write_all(content.as_bytes())
+        .write_all(content)
         .map_err(|e| SerializeError::CfbError(e.to_string()))
 }
 
-fn serialize_content_hpf(doc: &Document) -> String {
+fn serialize_content_hpf(doc: &Document, section_paths: &[String], bindata_paths: &[String]) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(
@@ -574,27 +937,40 @@ fn serialize_content_hpf(doc: &Document) -> String {
     xml.push_str(r#"<opf:manifest>"#);
     xml.push_str(r#"<opf:item id="header" href="Contents/header.xml" media-type="application/xml"/>"#);
 
-    for content in &doc.bin_data_content {
-        let media_type = media_type_for_extension(&content.extension);
+    for (index, path) in bindata_paths.iter().enumerate() {
+        let extension = path
+            .rsplit('.')
+            .next()
+            .filter(|ext| !ext.contains('/'))
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                doc.doc_info
+                    .bin_data_list
+                    .get(index)
+                    .and_then(|info| info.extension.clone())
+            })
+            .or_else(|| doc.bin_data_content.get(index).map(|content| content.extension.clone()))
+            .unwrap_or_else(|| "dat".to_string());
+        let media_type = media_type_for_extension(&extension);
         xml.push_str(&format!(
-            r#"<opf:item id="image{}" href="BinData/image{}.{}" media-type="{}" isEmbeded="1"/>"#,
-            content.id,
-            content.id,
-            xml_escape_attr(&content.extension),
+            r#"<opf:item id="image{}" href="{}" media-type="{}" isEmbeded="1"/>"#,
+            index + 1,
+            xml_escape_attr(path),
             media_type,
         ));
     }
 
-    for index in 0..doc.sections.len().max(1) {
+    for (index, path) in section_paths.iter().enumerate() {
         xml.push_str(&format!(
-            r#"<opf:item id="section{}" href="Contents/section{}.xml" media-type="application/xml"/>"#,
-            index, index
+            r#"<opf:item id="section{}" href="{}" media-type="application/xml"/>"#,
+            index,
+            xml_escape_attr(path),
         ));
     }
 
     xml.push_str(r#"</opf:manifest><opf:spine>"#);
     xml.push_str(r#"<opf:itemref idref="header" linear="yes"/>"#);
-    for index in 0..doc.sections.len().max(1) {
+    for index in 0..section_paths.len() {
         xml.push_str(&format!(
             r#"<opf:itemref idref="section{}" linear="yes"/>"#,
             index

@@ -23,6 +23,7 @@ use crate::renderer::render_tree::PageRenderTree;
 use crate::renderer::style_resolver::ResolvedStyleSet;
 use crate::renderer::composer::ComposedParagraph;
 use crate::renderer::DEFAULT_DPI;
+use crate::parser::hwpx::reader::HwpxPackageSnapshot;
 
 /// 기본 폰트 fallback 경로
 pub const DEFAULT_FALLBACK_FONT: &str = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf";
@@ -163,7 +164,7 @@ pub struct DocumentCore {
     /// 저장되지 않은 변경 여부
     pub(crate) dirty: bool,
     /// 원본 HWPX 패키지 바이트 (보호 모드 round-trip 보존용)
-    pub(crate) original_hwpx_package: Option<Vec<u8>>,
+    pub(crate) hwpx_package_snapshot: Option<HwpxPackageSnapshot>,
     /// 현재 활성 필드 위치 (커서가 진입한 누름틀 — 안내문 렌더링 스킵용)
     /// (section_idx, para_idx, field_control_idx)
     pub(crate) active_field: Option<ActiveFieldInfo>,
@@ -281,7 +282,14 @@ impl DocumentCore {
     }
 
     fn hwpx_support_report(&self) -> crate::serializer::HwpxSupportReport {
-        crate::serializer::analyze_hwpx_support(&self.document)
+        crate::serializer::analyze_hwpx_support_with_context(
+            &self.document,
+            crate::serializer::HwpxPreservationContext {
+                snapshot: self.hwpx_package_snapshot.as_ref(),
+                dirty_sections: Some(&self.dirty_sections),
+                doc_info_dirty: self.document.doc_info.raw_stream_dirty,
+            },
+        )
     }
 
     pub fn edit_mode(&self) -> DocumentEditMode {
@@ -328,7 +336,9 @@ impl DocumentCore {
             );
         }
         if self.source_format == DocumentSourceFormat::Hwpx {
-            warnings.extend(self.hwpx_support_report().warnings);
+            let report = self.hwpx_support_report();
+            warnings.extend(report.warnings);
+            warnings.extend(report.infos);
         }
 
         warnings
@@ -595,7 +605,7 @@ impl DocumentCore {
             file_path: String::new(),
             source_format: DocumentSourceFormat::Unknown,
             dirty: false,
-            original_hwpx_package: None,
+            hwpx_package_snapshot: None,
             active_field: None,
             para_offset: Vec::new(),
         }

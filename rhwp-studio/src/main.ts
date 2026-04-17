@@ -137,6 +137,22 @@ async function refreshDesktopAssociationStatus(): Promise<void> {
   renderSessionBanner();
 }
 
+function syncSessionFromWasm(): void {
+  if (!documentSession.current.hasDocument) return;
+
+  documentSession.syncCapabilities(wasm.getDocumentCapabilities());
+  documentSession.setReports(
+    wasm.getCompatibilityReport().issues,
+    wasm.getFontSubstitutionReport().items,
+  );
+
+  toolbar?.setEnabled(!documentSession.current.isProtected);
+  if (documentSession.current.isProtected) {
+    inputHandler?.deactivate();
+  }
+  renderSessionBanner();
+}
+
 function renderSessionBanner(): void {
   const banner = sessionBanner();
   const session = documentSession.current;
@@ -670,7 +686,7 @@ function setupEventListeners(): void {
     if (!documentSession.current.hasDocument || documentSession.current.isProtected) return;
     documentSession.markDirty();
     wasm.markDirty();
-    renderSessionBanner();
+    syncSessionFromWasm();
     eventBus.emit('command-state-changed');
   });
 

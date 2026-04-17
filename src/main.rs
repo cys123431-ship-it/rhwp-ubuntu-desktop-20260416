@@ -2482,15 +2482,9 @@ fn load_corpus_manifest(manifest_path: &Path) -> Result<Vec<CorpusEntry>, String
             manifest_path,
             line_idx + 1,
         )?;
-        let required_issue_codes = columns
-            .get(3)
-            .copied()
-            .unwrap_or_default()
-            .split(',')
-            .map(str::trim)
-            .filter(|code| !code.is_empty())
-            .map(ToOwned::to_owned)
-            .collect::<Vec<_>>();
+        let required_issue_codes = parse_required_issue_codes(
+            columns.get(3).copied().unwrap_or_default(),
+        );
         let roundtrip = parse_roundtrip_expectation(
             columns.get(4).copied().unwrap_or_default(),
             expected_edit_mode,
@@ -2553,6 +2547,19 @@ fn parse_expected_save_format(
             other
         )),
     }
+}
+
+fn parse_required_issue_codes(value: &str) -> Vec<String> {
+    if value.trim().eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn parse_roundtrip_expectation(

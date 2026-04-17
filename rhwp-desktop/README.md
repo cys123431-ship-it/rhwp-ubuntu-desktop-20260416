@@ -46,7 +46,7 @@ Ubuntu packaging assets live under [packaging/linux](./packaging/linux).
 ## CI and releases
 
 - `.github/workflows/rhwp-desktop-linux.yml` builds the Ubuntu `.deb` on `ubuntu-22.04`.
-- The same workflow regenerates synthetic phase-1-safe HWPX fixtures and runs the `phase1-supported` / `phase1-protected` corpus manifests before packaging.
+- The same workflow regenerates synthetic phase-1-safe HWPX fixtures, validates the `phase1-supported` / `phase1-protected` / `phase2-extended` corpus manifests, and uploads per-document `compat-report` artifacts for the phase-2 set before packaging.
 - The same workflow installs the package on `ubuntu-24.04`, validates the desktop and MIME assets, configures `xdg-mime`, and launches sample `.hwp` and `.hwpx` files under `xvfb`.
 - Tag pushes matching `v*` upload the `.deb` artifact to the GitHub release automatically.
 

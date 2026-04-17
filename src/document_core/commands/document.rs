@@ -20,6 +20,17 @@ impl DocumentCore {
         };
         let mut document = crate::parser::parse_document(data)
             .map_err(|e| HwpError::InvalidFile(e.to_string()))?;
+        let hwpx_package_snapshot = if source_format == DocumentSourceFormat::Hwpx {
+            match crate::parser::hwpx::reader::HwpxPackageSnapshot::from_bytes(data) {
+                Ok(snapshot) => Some(snapshot),
+                Err(error) => {
+                    eprintln!("warning: failed to capture HWPX package snapshot: {}", error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let styles = resolve_styles(&document.doc_info, DEFAULT_DPI);
 
@@ -69,8 +80,7 @@ impl DocumentCore {
             file_path: String::new(),
             source_format,
             dirty: false,
-            original_hwpx_package: (source_format == DocumentSourceFormat::Hwpx)
-                .then(|| data.to_vec()),
+            hwpx_package_snapshot,
             active_field: None,
             para_offset: Vec::new(),
         };
@@ -258,7 +268,7 @@ impl DocumentCore {
         self.next_snapshot_id = 0;
         self.source_format = DocumentSourceFormat::Hwp;
         self.dirty = false;
-        self.original_hwpx_package = None;
+        self.hwpx_package_snapshot = None;
         self.file_path.clear();
 
         self.convert_to_editable_native()?;
@@ -274,7 +284,14 @@ impl DocumentCore {
     }
 
     pub fn export_hwpx_native(&self) -> Result<Vec<u8>, HwpError> {
-        crate::serializer::serialize_hwpx(&self.document)
+        crate::serializer::serialize_hwpx_with_context(
+            &self.document,
+            crate::serializer::HwpxPreservationContext {
+                snapshot: self.hwpx_package_snapshot.as_ref(),
+                dirty_sections: Some(&self.dirty_sections),
+                doc_info_dirty: self.document.doc_info.raw_stream_dirty,
+            },
+        )
             .map_err(|e| HwpError::RenderError(e.to_string()))
     }
 

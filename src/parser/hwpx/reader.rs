@@ -14,7 +14,7 @@
 use std::io::{self, Cursor, Read};
 use zip::ZipArchive;
 
-use super::HwpxError;
+use super::{content, HwpxError};
 
 /// XML 엔트리(section, header, content.hpf 등) 엔트리당 압축 해제 상한.
 ///
@@ -48,6 +48,111 @@ fn read_limited<R: Read>(reader: &mut R, max: usize) -> io::Result<Vec<u8>> {
 /// HWPX ZIP 컨테이너 리더
 pub struct HwpxReader {
     archive: ZipArchive<Cursor<Vec<u8>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HwpxPackageEntryRole {
+    ContentHpf,
+    HeaderXml,
+    Section(usize),
+    BinData(usize),
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HwpxPackageEntrySnapshot {
+    pub path: String,
+    pub bytes: Vec<u8>,
+    pub role: HwpxPackageEntryRole,
+    pub replaceable: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HwpxPackageSnapshot {
+    pub entries: Vec<HwpxPackageEntrySnapshot>,
+}
+
+impl HwpxPackageSnapshot {
+    pub fn from_bytes(data: &[u8]) -> Result<Self, HwpxError> {
+        let mut reader = HwpxReader::open(data)?;
+        let file_names = reader.file_names();
+        let package_info = reader
+            .read_file("Contents/content.hpf")
+            .ok()
+            .and_then(|xml| content::parse_content_hpf(&xml).ok());
+        let section_paths = package_info
+            .as_ref()
+            .map(|info| info.section_files.clone())
+            .unwrap_or_default();
+        let bindata_paths = package_info
+            .as_ref()
+            .map(|info| {
+                info.bin_data_items
+                    .iter()
+                    .map(|item| item.href.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut entries = Vec::new();
+        for path in file_names {
+            if path.ends_with('/') {
+                continue;
+            }
+
+            let bytes = reader.read_file_bytes(&path)?;
+            let (role, replaceable) = if path == "Contents/content.hpf" {
+                (HwpxPackageEntryRole::ContentHpf, true)
+            } else if path == "Contents/header.xml" {
+                (HwpxPackageEntryRole::HeaderXml, true)
+            } else if let Some(section_idx) = section_paths.iter().position(|entry| entry == &path) {
+                (HwpxPackageEntryRole::Section(section_idx), true)
+            } else if let Some(bin_idx) = bindata_paths.iter().position(|entry| entry == &path) {
+                (HwpxPackageEntryRole::BinData(bin_idx), true)
+            } else {
+                (HwpxPackageEntryRole::Other, false)
+            };
+
+            entries.push(HwpxPackageEntrySnapshot {
+                path,
+                bytes,
+                role,
+                replaceable,
+            });
+        }
+
+        Ok(HwpxPackageSnapshot { entries })
+    }
+
+    pub fn entry(&self, path: &str) -> Option<&HwpxPackageEntrySnapshot> {
+        self.entries.iter().find(|entry| entry.path == path)
+    }
+
+    pub fn section_paths(&self) -> Vec<String> {
+        let mut sections = self
+            .entries
+            .iter()
+            .filter_map(|entry| match entry.role {
+                HwpxPackageEntryRole::Section(index) => Some((index, entry.path.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        sections.sort_by_key(|(index, _)| *index);
+        sections.into_iter().map(|(_, path)| path).collect()
+    }
+
+    pub fn bindata_paths(&self) -> Vec<String> {
+        let mut bindata = self
+            .entries
+            .iter()
+            .filter_map(|entry| match entry.role {
+                HwpxPackageEntryRole::BinData(index) => Some((index, entry.path.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        bindata.sort_by_key(|(index, _)| *index);
+        bindata.into_iter().map(|(_, path)| path).collect()
+    }
 }
 
 impl HwpxReader {
@@ -99,6 +204,43 @@ mod tests {
     fn test_open_invalid_zip() {
         let result = HwpxReader::open(&[0u8; 100]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_snapshot_classifies_known_paths() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+        use zip::ZipWriter;
+
+        let mut out = Cursor::new(Vec::<u8>::new());
+        {
+            let mut zip = ZipWriter::new(&mut out);
+            let options = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("Contents/content.hpf", options).unwrap();
+            zip.write_all(br#"<?xml version="1.0"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf/"><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/><opf:item id="image1" href="BinData/custom.bin" media-type="application/octet-stream"/></opf:manifest><opf:spine><opf:itemref idref="section0"/></opf:spine></opf:package>"#).unwrap();
+            zip.start_file("Contents/header.xml", options).unwrap();
+            zip.write_all(b"<hh:head/>").unwrap();
+            zip.start_file("Contents/section0.xml", options).unwrap();
+            zip.write_all(b"<hp:section/>").unwrap();
+            zip.start_file("BinData/custom.bin", options).unwrap();
+            zip.write_all(&[1, 2, 3]).unwrap();
+            zip.start_file("META-INF/manifest.xml", options).unwrap();
+            zip.write_all(b"<meta/>").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let snapshot = HwpxPackageSnapshot::from_bytes(&out.into_inner()).unwrap();
+        assert_eq!(snapshot.section_paths(), vec!["Contents/section0.xml".to_string()]);
+        assert_eq!(snapshot.bindata_paths(), vec!["BinData/custom.bin".to_string()]);
+        assert!(matches!(
+            snapshot.entry("Contents/header.xml").map(|entry| &entry.role),
+            Some(HwpxPackageEntryRole::HeaderXml)
+        ));
+        assert!(matches!(
+            snapshot.entry("META-INF/manifest.xml").map(|entry| &entry.role),
+            Some(HwpxPackageEntryRole::Other)
+        ));
     }
 
     #[test]
