@@ -721,4 +721,37 @@ mod tests {
 
         insta::assert_json_snapshot!("table_vpos_preservation_compatibility_report", report);
     }
+
+    #[test]
+    fn compatibility_report_snapshot_for_equation_fixture() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("compatibility-corpus/fixtures/equation-basic.hwpx");
+        let bytes = std::fs::read(sample).expect("read equation-basic.hwpx");
+        let core = DocumentCore::from_bytes(&bytes).expect("parse equation-basic.hwpx");
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("equation_basic_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_snapshot_for_ruby_fixture() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("compatibility-corpus/fixtures/ruby-basic.hwpx");
+        let bytes = std::fs::read(sample).expect("read ruby-basic.hwpx");
+        let core = DocumentCore::from_bytes(&bytes).expect("parse ruby-basic.hwpx");
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("ruby_basic_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_snapshot_for_hidden_comment_fixture() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("compatibility-corpus/fixtures/hidden-comment.hwpx");
+        let bytes = std::fs::read(sample).expect("read hidden-comment.hwpx");
+        let core = DocumentCore::from_bytes(&bytes).expect("parse hidden-comment.hwpx");
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("hidden_comment_compatibility_report", report);
+    }
 }

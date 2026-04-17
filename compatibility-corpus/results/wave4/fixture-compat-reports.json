@@ -1,0 +1,74 @@
+[
+  {
+    "file": "compatibility-corpus/fixtures/equation-basic.hwpx",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "pageCount": 1,
+    "issues": [
+      {
+        "code": "font-substitution",
+        "severity": "warning",
+        "message": "Layout may differ if required Hancom fonts are missing on this system."
+      }
+    ],
+    "fontSubstitutions": [],
+    "renderSignature": {
+      "pageCount": 1,
+      "pageInfoHashes": [
+        5064031441882687210
+      ],
+      "renderTreeHashes": [
+        15443185443099813090
+      ]
+    }
+  },
+  {
+    "file": "compatibility-corpus/fixtures/ruby-basic.hwpx",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "pageCount": 1,
+    "issues": [
+      {
+        "code": "font-substitution",
+        "severity": "warning",
+        "message": "Layout may differ if required Hancom fonts are missing on this system."
+      }
+    ],
+    "fontSubstitutions": [],
+    "renderSignature": {
+      "pageCount": 1,
+      "pageInfoHashes": [
+        5064031441882687210
+      ],
+      "renderTreeHashes": [
+        15870192090713570747
+      ]
+    }
+  },
+  {
+    "file": "compatibility-corpus/fixtures/hidden-comment.hwpx",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "pageCount": 1,
+    "issues": [
+      {
+        "code": "font-substitution",
+        "severity": "warning",
+        "message": "Layout may differ if required Hancom fonts are missing on this system."
+      }
+    ],
+    "fontSubstitutions": [],
+    "renderSignature": {
+      "pageCount": 1,
+      "pageInfoHashes": [
+        5064031441882687210
+      ],
+      "renderTreeHashes": [
+        4845236335163136793
+      ]
+    }
+  }
+]
