@@ -3082,6 +3082,7 @@ fn compat_generate_fixtures(args: &[String]) {
             build_unsupported_shape_fixture_bytes(),
         ),
         ("unknown-control.hwpx", build_unknown_control_fixture_bytes()),
+        ("wave5-metadata.hwpx", build_wave5_metadata_fixture_bytes()),
     ];
 
     for (file_name, bytes) in byte_fixtures {
@@ -3359,6 +3360,25 @@ fn build_unknown_control_fixture_bytes() -> Result<Vec<u8>, String> {
         );
         if updated == xml {
             Err("failed to inject unknown control payload".to_string())
+        } else {
+            Ok(updated)
+        }
+    })
+}
+
+fn build_wave5_metadata_fixture_bytes() -> Result<Vec<u8>, String> {
+    let base = rhwp::serializer::serialize_hwpx(&build_basic_text_fixture())
+        .map_err(|error| format!("serialize base wave5 metadata fixture: {}", error))?;
+    rewrite_hwpx_section_xml(&base, |xml| {
+        let injected = concat!(
+            "<hp:pageBorderFill borderFillIDRef=\"9\" type=\"BOTH\" textBorder=\"CONTENT\" headerInside=\"0\" footerInside=\"0\" fillArea=\"PAGE\">",
+            "<hp:offset left=\"1417\" right=\"1417\" top=\"1417\" bottom=\"1417\"/>",
+            "</hp:pageBorderFill>",
+            "<hp:masterPage idRef=\"mp0\"/>"
+        );
+        let updated = xml.replacen("</hp:secPr>", &format!("{}</hp:secPr>", injected), 1);
+        if updated == xml {
+            Err("failed to inject wave5 metadata payload".to_string())
         } else {
             Ok(updated)
         }

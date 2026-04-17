@@ -58,5 +58,29 @@
         "message": "Paragraph 0 in section 0 contains unknown controls that are not written to HWPX yet."
       }
     ]
+  },
+  {
+    "scenario": "wave5-metadata-fixture",
+    "path": "compatibility-corpus/fixtures/wave5-metadata.hwpx",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "issues": [
+      {
+        "code": "font-substitution",
+        "severity": "warning",
+        "message": "Layout may differ if required Hancom fonts are missing on this system."
+      },
+      {
+        "code": "hwpx-section-page-border-fill",
+        "severity": "warning",
+        "message": "Section 0 uses page border/fill settings that are not written to HWPX yet."
+      },
+      {
+        "code": "hwpx-section-master-pages",
+        "severity": "warning",
+        "message": "Section 0 uses master pages that are not written to HWPX yet."
+      }
+    ]
   }
 ]

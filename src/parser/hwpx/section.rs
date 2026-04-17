@@ -13,7 +13,7 @@ use crate::model::control::{
 };
 use crate::model::document::{Section, SectionDef};
 use crate::model::footnote::{Endnote, Footnote};
-use crate::model::header_footer::{Footer, Header, HeaderFooterApply};
+use crate::model::header_footer::{Footer, Header, HeaderFooterApply, MasterPage};
 use crate::model::image::{CropInfo, ImageAttr, ImageEffect};
 use crate::model::page::{ColumnDef, ColumnDirection, ColumnType, PageDef};
 use crate::model::paragraph::{CharShapeRef, FieldRange, LineSeg, Paragraph};
@@ -386,8 +386,20 @@ fn parse_sec_pr_children(
                 match local {
                     b"pagePr" => parse_page_pr(e, &mut sec_def.page_def),
                     b"margin" => parse_page_margin(e, &mut sec_def.page_def),
+                    b"pageBorderFill" => {
+                        let page_border_fill = parse_page_border_fill(e, reader)?;
+                        if sec_def.page_border_fill.border_fill_id == 0 {
+                            sec_def.page_border_fill = page_border_fill;
+                        } else {
+                            sec_def.extra_page_border_fills.push(page_border_fill);
+                        }
+                    }
                     b"colPr" => {
                         col_def = Some(parse_col_pr(e));
+                    }
+                    b"masterPage" => {
+                        sec_def.master_pages.push(parse_master_page(e));
+                        skip_element(reader, b"masterPage")?;
                     }
                     b"startNum" => parse_start_num(e, sec_def),
                     b"visibility" => parse_visibility(e, sec_def),
@@ -400,9 +412,18 @@ fn parse_sec_pr_children(
                 match local {
                     b"pagePr" => parse_page_pr(e, &mut sec_def.page_def),
                     b"margin" => parse_page_margin(e, &mut sec_def.page_def),
+                    b"pageBorderFill" => {
+                        let page_border_fill = parse_page_border_fill_empty(e);
+                        if sec_def.page_border_fill.border_fill_id == 0 {
+                            sec_def.page_border_fill = page_border_fill;
+                        } else {
+                            sec_def.extra_page_border_fills.push(page_border_fill);
+                        }
+                    }
                     b"colPr" => {
                         col_def = Some(parse_col_pr(e));
                     }
+                    b"masterPage" => sec_def.master_pages.push(parse_master_page(e)),
                     b"startNum" => parse_start_num(e, sec_def),
                     b"visibility" => parse_visibility(e, sec_def),
                     _ => {}
@@ -477,6 +498,76 @@ fn parse_col_pr(e: &quick_xml::events::BytesStart) -> ColumnDef {
         }
     }
     cd
+}
+
+fn parse_page_border_fill_empty(e: &quick_xml::events::BytesStart) -> crate::model::page::PageBorderFill {
+    let mut pbf = crate::model::page::PageBorderFill::default();
+    for attr in e.attributes().flatten() {
+        if attr.key.as_ref() == b"borderFillIDRef" {
+            pbf.border_fill_id = parse_u16(&attr);
+        }
+    }
+    pbf
+}
+
+fn parse_page_border_fill(
+    e: &quick_xml::events::BytesStart,
+    reader: &mut Reader<&[u8]>,
+) -> Result<crate::model::page::PageBorderFill, HwpxError> {
+    let mut pbf = parse_page_border_fill_empty(e);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref child)) => {
+                if local_name(child.name().as_ref()) == b"offset" {
+                    parse_page_border_fill_offset(child, &mut pbf);
+                    skip_element(reader, b"offset")?;
+                }
+            }
+            Ok(Event::Empty(ref child)) => {
+                if local_name(child.name().as_ref()) == b"offset" {
+                    parse_page_border_fill_offset(child, &mut pbf);
+                }
+            }
+            Ok(Event::End(ref child)) => {
+                if local_name(child.name().as_ref()) == b"pageBorderFill" {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(HwpxError::XmlError(format!("pageBorderFill: {}", e))),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(pbf)
+}
+
+fn parse_page_border_fill_offset(
+    e: &quick_xml::events::BytesStart,
+    pbf: &mut crate::model::page::PageBorderFill,
+) {
+    for attr in e.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"left" => pbf.spacing_left = parse_i16(&attr),
+            b"right" => pbf.spacing_right = parse_i16(&attr),
+            b"top" => pbf.spacing_top = parse_i16(&attr),
+            b"bottom" => pbf.spacing_bottom = parse_i16(&attr),
+            _ => {}
+        }
+    }
+}
+
+fn parse_master_page(e: &quick_xml::events::BytesStart) -> MasterPage {
+    let mut master_page = MasterPage::default();
+    for attr in e.attributes().flatten() {
+        if attr.key.as_ref() == b"idRef" {
+            master_page.raw_list_header = attr_str(&attr).into_bytes();
+        }
+    }
+    master_page
 }
 
 /// <hp:linesegarray> 내부의 <hp:lineseg> 요소들을 파싱한다.
@@ -3469,5 +3560,32 @@ mod tests {
             Control::Unknown(ctrl) => assert_eq!(ctrl.ctrl_id, u32::from_be_bytes(*b"myst")),
             other => panic!("Expected unknown control, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_parse_secpr_page_border_fill_and_master_page() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
+        xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section">
+  <hp:p paraPrIDRef="0" styleIDRef="0">
+    <hp:secPr textDirection="HORIZONTAL" tabStop="0">
+      <hp:pagePr width="59528" height="84188" landscape="0"/>
+      <hp:margin left="8504" right="8504" top="5669" bottom="4252" header="4252" footer="4252" gutter="0"/>
+      <hp:pageBorderFill borderFillIDRef="9" type="BOTH" textBorder="CONTENT" headerInside="0" footerInside="0" fillArea="PAGE">
+        <hp:offset left="1417" right="1417" top="1417" bottom="1417"/>
+      </hp:pageBorderFill>
+      <hp:masterPage idRef="mp0"/>
+    </hp:secPr>
+    <hp:run charPrIDRef="0">
+      <hp:t>Hello</hp:t>
+    </hp:run>
+  </hp:p>
+</hs:sec>"#;
+
+        let section = parse_hwpx_section(xml).unwrap();
+        assert_eq!(section.section_def.page_border_fill.border_fill_id, 9);
+        assert_eq!(section.section_def.page_border_fill.spacing_left, 1417);
+        assert_eq!(section.section_def.master_pages.len(), 1);
+        assert_eq!(section.section_def.master_pages[0].raw_list_header, b"mp0");
     }
 }

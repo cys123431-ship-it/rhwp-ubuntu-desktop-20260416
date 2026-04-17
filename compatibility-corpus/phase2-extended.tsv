@@ -8,5 +8,6 @@
 ../rhwp-studio/public/samples/form-002.hwpx	editable-safe	hwpx		save-reparse
 ../samples/table-vpos-01.hwpx	editable-safe	hwpx	hwpx-field-missing-range,hwpx-char-overlap	none
 fixtures/unknown-control.hwpx	editable-safe	hwpx	hwpx-unknown-control	none
+fixtures/wave5-metadata.hwpx	editable-safe	hwpx	hwpx-section-page-border-fill,hwpx-section-master-pages	none
 fixtures/unsupported-shape-clean-section.hwpx	editable-safe	hwpx	hwpx-shape-unsupported	none
 fixtures/unsupported-shape-dirty-section.hwpx	editable-safe	hwpx	hwpx-shape-unsupported	none

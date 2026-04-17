@@ -1,0 +1,34 @@
+﻿{
+  "file": "compatibility-corpus/fixtures/wave5-metadata.hwpx",
+  "sourceFormat": "hwpx",
+  "preferredSaveFormat": "hwpx",
+  "editMode": "editable-safe",
+  "pageCount": 1,
+  "issues": [
+    {
+      "code": "font-substitution",
+      "severity": "warning",
+      "message": "Layout may differ if required Hancom fonts are missing on this system."
+    },
+    {
+      "code": "hwpx-section-page-border-fill",
+      "severity": "warning",
+      "message": "Section 0 uses page border/fill settings that are not written to HWPX yet."
+    },
+    {
+      "code": "hwpx-section-master-pages",
+      "severity": "warning",
+      "message": "Section 0 uses master pages that are not written to HWPX yet."
+    }
+  ],
+  "fontSubstitutions": [],
+  "renderSignature": {
+    "pageCount": 1,
+    "pageInfoHashes": [
+      5064031441882687210
+    ],
+    "renderTreeHashes": [
+      11345577218473125958
+    ]
+  }
+}

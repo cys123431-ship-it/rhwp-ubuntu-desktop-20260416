@@ -17,10 +17,12 @@
 - Snapshot: `preserved_unknown_control_compatibility_report`
 - JSON baseline: `metadata-compat-reports.json`
 - Fixture report: `unknown-control-fixture.json`
+- Fixture report: `wave5-metadata-fixture.json`
 - Serializer test: `test_preservation_context_downgrades_wave5_metadata_until_dirty`
 - DocumentCore test: `compatibility_report_marks_dirty_wave5_metadata_as_protected`
 - DocumentCore test: `compatibility_report_marks_dirty_unknown_control_as_protected`
 - Parser test: `test_parse_unknown_empty_control_inside_ctrl`
+- Parser test: `test_parse_secpr_page_border_fill_and_master_page`
 
 ## Policy
 
@@ -33,3 +35,6 @@
 - Fixture: `compatibility-corpus/fixtures/unknown-control.hwpx`
 - Manifest: `compatibility-corpus/phase2-extended.tsv`
 - Expected outcome: `editable-safe` with `hwpx-unknown-control`
+- Fixture: `compatibility-corpus/fixtures/wave5-metadata.hwpx`
+- Manifest: `compatibility-corpus/phase2-extended.tsv`
+- Expected outcome: `editable-safe` with `hwpx-section-page-border-fill`, `hwpx-section-master-pages`
