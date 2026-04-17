@@ -1,0 +1,31 @@
+---
+source: src/document_core/mod.rs
+expression: report
+---
+{
+  "editMode": "editable-safe",
+  "issues": [
+    {
+      "code": "hwpx-docinfo-extra-records",
+      "message": "Extra DocInfo records are not preserved in HWPX saves yet.",
+      "severity": "warning"
+    },
+    {
+      "code": "hwpx-section-page-border-fill",
+      "message": "Section 0 uses page border/fill settings that are not written to HWPX yet.",
+      "severity": "warning"
+    },
+    {
+      "code": "hwpx-section-master-pages",
+      "message": "Section 0 uses master pages that are not written to HWPX yet.",
+      "severity": "warning"
+    },
+    {
+      "code": "hwpx-section-extra-records",
+      "message": "Section 0 carries extra section records that are not preserved in HWPX yet.",
+      "severity": "warning"
+    }
+  ],
+  "preferredSaveFormat": "hwpx",
+  "sourceFormat": "hwpx"
+}

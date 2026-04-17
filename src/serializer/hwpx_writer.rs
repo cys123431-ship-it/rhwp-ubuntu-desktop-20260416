@@ -284,6 +284,66 @@ mod tests_clean {
     }
 
     #[test]
+    fn test_preservation_context_downgrades_wave5_metadata_until_dirty() {
+        let mut document = Document::default();
+        document.doc_info.extra_records.push(Default::default());
+        document.sections.push(Section {
+            section_def: SectionDef {
+                page_border_fill: crate::model::page::PageBorderFill {
+                    border_fill_id: 7,
+                    ..Default::default()
+                },
+                master_pages: vec![crate::model::header_footer::MasterPage::default()],
+                extra_child_records: vec![Default::default()],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let snapshot = HwpxPackageSnapshot::default();
+
+        let clean_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[false]),
+                doc_info_dirty: false,
+            },
+        );
+        assert!(clean_report.is_supported(), "{:?}", clean_report.blockers);
+        for code in [
+            "hwpx-docinfo-extra-records",
+            "hwpx-section-page-border-fill",
+            "hwpx-section-master-pages",
+            "hwpx-section-extra-records",
+        ] {
+            assert!(clean_report.issues.iter().any(|issue| {
+                issue.code == code && issue.severity == HwpxIssueSeverity::Warning
+            }));
+        }
+
+        let dirty_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[true]),
+                doc_info_dirty: true,
+            },
+        );
+        assert!(!dirty_report.is_supported());
+        for code in [
+            "hwpx-docinfo-extra-records",
+            "hwpx-section-page-border-fill",
+            "hwpx-section-master-pages",
+            "hwpx-section-extra-records",
+        ] {
+            assert!(dirty_report.issues.iter().any(|issue| {
+                issue.code == code && issue.severity == HwpxIssueSeverity::Blocker
+            }));
+        }
+    }
+
+    #[test]
     fn test_supported_shape_roundtrip_textbox_and_caption() {
         let mut document = Document::default();
         document.doc_info.font_faces = vec![Vec::new(); 7];

@@ -692,6 +692,82 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_report_snapshot_for_preserved_wave5_metadata() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/preserved-wave5.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        core.document
+            .doc_info
+            .extra_records
+            .push(Default::default());
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                section_def: crate::model::document::SectionDef {
+                    page_border_fill: crate::model::page::PageBorderFill {
+                        border_fill_id: 9,
+                        ..Default::default()
+                    },
+                    master_pages: vec![crate::model::header_footer::MasterPage::default()],
+                    extra_child_records: vec![Default::default()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        core.dirty_sections = vec![false];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("preserved_wave5_metadata_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_marks_dirty_wave5_metadata_as_protected() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/dirty-wave5.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        core.document
+            .doc_info
+            .extra_records
+            .push(Default::default());
+        core.document.doc_info.raw_stream_dirty = true;
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                section_def: crate::model::document::SectionDef {
+                    page_border_fill: crate::model::page::PageBorderFill {
+                        border_fill_id: 9,
+                        ..Default::default()
+                    },
+                    master_pages: vec![crate::model::header_footer::MasterPage::default()],
+                    extra_child_records: vec![Default::default()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        core.dirty_sections = vec![true];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+        let issues = report["issues"].as_array().unwrap();
+
+        assert_eq!(report["editMode"], "protected-view");
+        for code in [
+            "hwpx-docinfo-extra-records",
+            "hwpx-section-page-border-fill",
+            "hwpx-section-master-pages",
+            "hwpx-section-extra-records",
+        ] {
+            assert!(issues
+                .iter()
+                .any(|issue| { issue["code"] == code && issue["severity"] == "blocker" }));
+        }
+    }
+
+    #[test]
     fn compatibility_report_snapshot_for_tac_img_wave2_sample() {
         let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples/tac-img-02.hwpx");
         let bytes = std::fs::read(sample).expect("read tac-img-02.hwpx");
