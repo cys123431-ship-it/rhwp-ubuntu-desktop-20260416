@@ -137,6 +137,10 @@ jobs:
           for entry in wave4:
               print(f"- `{entry['path']}` -> `{entry.get('editMode', 'unknown')}` / `{entry.get('roundtripMode', 'none')}`")
           print()
+          print("### Wave 3 preservation policy")
+          print("- Clean snapshot-backed hyperlink controls stay `editable-safe` with `hwpx-hyperlink` as a warning.")
+          print("- Dirty sections with hyperlink controls escalate back to `protected-view`.")
+          print()
           print("### Wave 5 preservation policy")
           print("- Clean snapshot-backed metadata stays `editable-safe` with warning severity.")
           print("- Dirty metadata or dirty sections escalate back to `protected-view` blockers.")

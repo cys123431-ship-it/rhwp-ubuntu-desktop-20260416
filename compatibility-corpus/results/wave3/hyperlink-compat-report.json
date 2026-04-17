@@ -1,0 +1,15 @@
+[
+  {
+    "scenario": "preserved-hyperlink",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "issues": [
+      {
+        "code": "hwpx-hyperlink",
+        "severity": "warning",
+        "message": "Paragraph 0 in section 0 uses hyperlink controls that are not written to HWPX yet."
+      }
+    ]
+  }
+]

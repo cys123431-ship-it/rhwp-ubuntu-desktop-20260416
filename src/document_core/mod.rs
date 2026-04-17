@@ -820,6 +820,68 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_report_snapshot_for_preserved_hyperlink() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/preserved-hyperlink.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        let mut paragraph = Paragraph::new_empty();
+        paragraph
+            .controls
+            .push(crate::model::control::Control::Hyperlink(
+                crate::model::control::Hyperlink {
+                    url: "https://example.com".to_string(),
+                    text: "Example".to_string(),
+                },
+            ));
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+        core.dirty_sections = vec![false];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("preserved_hyperlink_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_marks_dirty_hyperlink_as_protected() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/dirty-hyperlink.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        let mut paragraph = Paragraph::new_empty();
+        paragraph
+            .controls
+            .push(crate::model::control::Control::Hyperlink(
+                crate::model::control::Hyperlink {
+                    url: "https://example.com".to_string(),
+                    text: "Example".to_string(),
+                },
+            ));
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+        core.dirty_sections = vec![true];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+        let issues = report["issues"].as_array().unwrap();
+
+        assert_eq!(report["editMode"], "protected-view");
+        assert!(issues
+            .iter()
+            .any(|issue| { issue["code"] == "hwpx-hyperlink" && issue["severity"] == "blocker" }));
+    }
+
+    #[test]
     fn compatibility_report_snapshot_for_tac_img_wave2_sample() {
         let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples/tac-img-02.hwpx");
         let bytes = std::fs::read(sample).expect("read tac-img-02.hwpx");
