@@ -1,0 +1,21 @@
+---
+source: src/document_core/mod.rs
+expression: report
+---
+{
+  "editMode": "editable-safe",
+  "issues": [
+    {
+      "code": "hwpx-field-missing-range",
+      "message": "Paragraph 0 in section 0 has a field control without a tracked text range.",
+      "severity": "warning"
+    },
+    {
+      "code": "hwpx-char-overlap",
+      "message": "Paragraph 0 in section 0 uses character-overlap controls that are not written to HWPX yet.",
+      "severity": "warning"
+    }
+  ],
+  "preferredSaveFormat": "hwpx",
+  "sourceFormat": "hwpx"
+}

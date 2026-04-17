@@ -1,0 +1,20 @@
+[
+  {
+    "scenario": "preserved-field-overlap",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "issues": [
+      {
+        "code": "hwpx-field-missing-range",
+        "severity": "warning",
+        "message": "Paragraph 0 in section 0 has a field control without a tracked text range."
+      },
+      {
+        "code": "hwpx-char-overlap",
+        "severity": "warning",
+        "message": "Paragraph 0 in section 0 uses character-overlap controls that are not written to HWPX yet."
+      }
+    ]
+  }
+]

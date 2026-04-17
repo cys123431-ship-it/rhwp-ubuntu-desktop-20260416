@@ -63,6 +63,8 @@ jobs:
         run: |
           cargo nextest run --profile ci --lib serializer::hwpx_writer::tests_clean
           INSTA_UPDATE=no cargo nextest run --profile ci --lib compatibility_report_snapshot
+          cargo nextest run --profile ci --lib hyperlink
+          cargo nextest run --profile ci --lib field_overlap
           cargo nextest run --profile ci --lib wave5_metadata
           cargo nextest run --profile ci --lib unknown_control
 
@@ -139,7 +141,9 @@ jobs:
           print()
           print("### Wave 3 preservation policy")
           print("- Clean snapshot-backed hyperlink controls stay `editable-safe` with `hwpx-hyperlink` as a warning.")
+          print("- Clean snapshot-backed field/char-overlap controls stay `editable-safe` with `hwpx-field-missing-range` and `hwpx-char-overlap` as warnings.")
           print("- Dirty sections with hyperlink controls escalate back to `protected-view`.")
+          print("- Dirty sections with field or char-overlap controls also escalate back to `protected-view`.")
           print()
           print("### Wave 5 preservation policy")
           print("- Clean snapshot-backed metadata stays `editable-safe` with warning severity.")

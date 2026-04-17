@@ -882,6 +882,70 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_report_snapshot_for_preserved_field_overlap() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/preserved-field-overlap.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        let mut paragraph = Paragraph::new_empty();
+        paragraph
+            .controls
+            .push(crate::model::control::Control::Field(Default::default()));
+        paragraph
+            .controls
+            .push(crate::model::control::Control::CharOverlap(
+                Default::default(),
+            ));
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+        core.dirty_sections = vec![false];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("preserved_field_overlap_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_marks_dirty_field_overlap_as_protected() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/dirty-field-overlap.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        let mut paragraph = Paragraph::new_empty();
+        paragraph
+            .controls
+            .push(crate::model::control::Control::Field(Default::default()));
+        paragraph
+            .controls
+            .push(crate::model::control::Control::CharOverlap(
+                Default::default(),
+            ));
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+        core.dirty_sections = vec![true];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+        let issues = report["issues"].as_array().unwrap();
+
+        assert_eq!(report["editMode"], "protected-view");
+        for code in ["hwpx-field-missing-range", "hwpx-char-overlap"] {
+            assert!(issues
+                .iter()
+                .any(|issue| { issue["code"] == code && issue["severity"] == "blocker" }));
+        }
+    }
+
+    #[test]
     fn compatibility_report_snapshot_for_tac_img_wave2_sample() {
         let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples/tac-img-02.hwpx");
         let bytes = std::fs::read(sample).expect("read tac-img-02.hwpx");
