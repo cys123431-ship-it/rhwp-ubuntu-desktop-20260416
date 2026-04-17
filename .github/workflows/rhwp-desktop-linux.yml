@@ -156,6 +156,7 @@ jobs:
           print("- Clean snapshot-backed metadata stays `editable-safe` with warning severity.")
           print("- Dirty metadata or dirty sections escalate back to `protected-view` blockers.")
           print("- Covered issue codes: `hwpx-docinfo-extra-records`, `hwpx-section-page-border-fill`, `hwpx-section-master-pages`, `hwpx-section-extra-records`, `hwpx-unknown-control`.")
+          print("- Fixture `fixtures/unknown-control.hwpx` stays `editable-safe` in `phase2-extended.tsv` with `hwpx-unknown-control` as a warning.")
           print()
           print("### Phase 1 protected scenarios")
           print(f"- Manifest: `{protected_summary['manifest']}`")

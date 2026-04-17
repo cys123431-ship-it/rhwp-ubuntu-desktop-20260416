@@ -9,6 +9,7 @@ use quick_xml::Reader;
 use crate::model::control::{
     AutoNumber, AutoNumberType, Bookmark, CharOverlap, Control, Equation, Field, FieldType,
     FormObject, FormType, HiddenComment, NewNumber, PageHide, PageNumberPos, Ruby,
+    UnknownControl,
 };
 use crate::model::document::{Section, SectionDef};
 use crate::model::footnote::{Endnote, Footnote};
@@ -2372,6 +2373,9 @@ fn parse_ctrl(
                         skip_element(reader, b"newNum")?;
                     }
                     _ => {
+                        controls.push(Control::Unknown(UnknownControl {
+                            ctrl_id: unknown_ctrl_id(local),
+                        }));
                         let tag = local.to_vec();
                         skip_element(reader, &tag)?;
                     }
@@ -2415,7 +2419,11 @@ fn parse_ctrl(
                         text_parts.push("\u{0004}".to_string());
                     }
                     b"hiddenComment" => {}
-                    _ => {}
+                    _ => {
+                        controls.push(Control::Unknown(UnknownControl {
+                            ctrl_id: unknown_ctrl_id(local),
+                        }));
+                    }
                 }
             }
             Ok(Event::End(ref ee)) => {
@@ -2431,6 +2439,18 @@ fn parse_ctrl(
         buf.clear();
     }
     Ok(())
+}
+
+fn unknown_ctrl_id(local: &[u8]) -> u32 {
+    if local.is_empty() {
+        return u32::from_be_bytes(*b"unkn");
+    }
+
+    let mut bytes = [b' '; 4];
+    for (idx, byte) in local.iter().copied().take(4).enumerate() {
+        bytes[idx] = if byte.is_ascii() { byte } else { b'?' };
+    }
+    u32::from_be_bytes(bytes)
 }
 
 // ─── ctrl 자식 요소 속성 파싱 헬퍼 ───
@@ -3398,6 +3418,7 @@ fn parse_form_object(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::control::Control;
 
     #[test]
     fn test_parse_simple_section() {
@@ -3422,5 +3443,31 @@ mod tests {
         let xml = r#"<?xml version="1.0"?><hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section"/>"#;
         let section = parse_hwpx_section(xml).unwrap();
         assert!(section.paragraphs.is_empty());
+    }
+
+    #[test]
+    fn test_parse_unknown_empty_control_inside_ctrl() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph"
+        xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section">
+  <hp:p paraPrIDRef="0" styleIDRef="0">
+    <hp:run charPrIDRef="0">
+      <hp:t>Hello</hp:t>
+      <hp:ctrl>
+        <hp:mysteryCtrl synthetic="wave5"/>
+      </hp:ctrl>
+    </hp:run>
+  </hp:p>
+</hs:sec>"#;
+
+        let section = parse_hwpx_section(xml).unwrap();
+        assert_eq!(section.paragraphs.len(), 1);
+        assert_eq!(section.paragraphs[0].text, "Hello");
+        assert_eq!(section.paragraphs[0].controls.len(), 1);
+
+        match &section.paragraphs[0].controls[0] {
+            Control::Unknown(ctrl) => assert_eq!(ctrl.ctrl_id, u32::from_be_bytes(*b"myst")),
+            other => panic!("Expected unknown control, got {:?}", other),
+        }
     }
 }

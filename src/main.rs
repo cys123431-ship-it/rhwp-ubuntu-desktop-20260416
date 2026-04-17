@@ -3081,6 +3081,7 @@ fn compat_generate_fixtures(args: &[String]) {
             "unsupported-shape-dirty-section.hwpx",
             build_unsupported_shape_fixture_bytes(),
         ),
+        ("unknown-control.hwpx", build_unknown_control_fixture_bytes()),
     ];
 
     for (file_name, bytes) in byte_fixtures {
@@ -3341,6 +3342,23 @@ fn build_unsupported_shape_fixture_bytes() -> Result<Vec<u8>, String> {
             .replacen("</hp:line>", "</hp:connectLine>", 1);
         if updated == xml {
             Err("failed to inject unsupported connectLine payload".to_string())
+        } else {
+            Ok(updated)
+        }
+    })
+}
+
+fn build_unknown_control_fixture_bytes() -> Result<Vec<u8>, String> {
+    let base = rhwp::serializer::serialize_hwpx(&build_basic_text_fixture())
+        .map_err(|error| format!("serialize base unknown-control fixture: {}", error))?;
+    rewrite_hwpx_section_xml(&base, |xml| {
+        let updated = xml.replacen(
+            "</hp:run>",
+            "<hp:ctrl><hp:mysteryCtrl synthetic=\"wave5\"/></hp:ctrl></hp:run>",
+            1,
+        );
+        if updated == xml {
+            Err("failed to inject unknown control payload".to_string())
         } else {
             Ok(updated)
         }

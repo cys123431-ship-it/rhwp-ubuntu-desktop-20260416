@@ -1,0 +1,29 @@
+﻿{
+  "file": "compatibility-corpus/fixtures/unknown-control.hwpx",
+  "sourceFormat": "hwpx",
+  "preferredSaveFormat": "hwpx",
+  "editMode": "editable-safe",
+  "pageCount": 1,
+  "issues": [
+    {
+      "code": "font-substitution",
+      "severity": "warning",
+      "message": "Layout may differ if required Hancom fonts are missing on this system."
+    },
+    {
+      "code": "hwpx-unknown-control",
+      "severity": "warning",
+      "message": "Paragraph 0 in section 0 contains unknown controls that are not written to HWPX yet."
+    }
+  ],
+  "fontSubstitutions": [],
+  "renderSignature": {
+    "pageCount": 1,
+    "pageInfoHashes": [
+      5064031441882687210
+    ],
+    "renderTreeHashes": [
+      11345577218473125958
+    ]
+  }
+}

@@ -39,5 +39,24 @@
         "message": "Paragraph 0 in section 0 contains unknown controls that are not written to HWPX yet."
       }
     ]
+  },
+  {
+    "scenario": "unknown-control-fixture",
+    "path": "compatibility-corpus/fixtures/unknown-control.hwpx",
+    "sourceFormat": "hwpx",
+    "preferredSaveFormat": "hwpx",
+    "editMode": "editable-safe",
+    "issues": [
+      {
+        "code": "font-substitution",
+        "severity": "warning",
+        "message": "Layout may differ if required Hancom fonts are missing on this system."
+      },
+      {
+        "code": "hwpx-unknown-control",
+        "severity": "warning",
+        "message": "Paragraph 0 in section 0 contains unknown controls that are not written to HWPX yet."
+      }
+    ]
   }
 ]
