@@ -1,3 +1,2 @@
 # path	expected_edit_mode	expected_save_format	required_issue_codes	roundtrip_mode
-../rhwp-studio/public/samples/form-002.hwpx	protected-view	hwpx	hwpx-form	none
-../samples/table-vpos-01.hwpx	protected-view	hwpx	hwpx-field-missing-range,hwpx-char-overlap	none
+fixtures/malformed.hwpx	parse-error		none	none

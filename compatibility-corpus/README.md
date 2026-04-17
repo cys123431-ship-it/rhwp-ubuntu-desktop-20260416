@@ -7,7 +7,8 @@ Phase corpus manifests for Ubuntu v1 shipment and later Hancom-grade compatibili
 - `phase1-supported.tsv`
   Safe documents that must parse, save, and reparse successfully.
 - `phase1-protected.tsv`
-  Risky documents that must open in `protected-view` with stable issue codes.
+  Failure-scenario corpus. Entries can require `protected-view` with stable issue codes, or an
+  explicit `parse-error` for malformed fixtures.
 - `phase2-extended.tsv`
   Broader exploratory corpus for later promotion work and compatibility report artifacts.
 
@@ -25,10 +26,13 @@ Blank columns are allowed.
 
 Valid values:
 
-- `expected_edit_mode`: `editable-safe`, `protected-view`
+- `expected_edit_mode`: `editable-safe`, `protected-view`, `parse-error`
 - `expected_save_format`: `hwp`, `hwpx`, `unknown`
 - `required_issue_codes`: comma-separated stable compatibility codes, or `none`
 - `roundtrip_mode`: `save-reparse`, `none`
+
+`parse-error` entries skip compatibility-report generation and pass when `compat-corpus` fails
+while parsing or rendering the fixture.
 
 Relative paths are resolved from the manifest directory.
 

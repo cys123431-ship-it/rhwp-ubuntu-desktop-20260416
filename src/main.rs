@@ -2231,11 +2231,18 @@ enum CorpusRoundtripExpectation {
     SaveReparse,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CorpusExpectedOutcome {
+    Any,
+    EditMode(rhwp::document_core::DocumentEditMode),
+    ParseError,
+}
+
 #[derive(Debug, Clone)]
 struct CorpusEntry {
     relative_path: PathBuf,
     absolute_path: PathBuf,
-    expected_edit_mode: Option<rhwp::document_core::DocumentEditMode>,
+    expected_outcome: CorpusExpectedOutcome,
     expected_save_format: Option<rhwp::document_core::DocumentSourceFormat>,
     required_issue_codes: Vec<String>,
     roundtrip: CorpusRoundtripExpectation,
@@ -2495,11 +2502,20 @@ fn compat_corpus(args: &[String]) {
                     .map(|issue| issue.code)
                     .collect::<Vec<_>>();
 
-                if let Some(expected_edit_mode) = entry.expected_edit_mode {
-                    if report.edit_mode != expected_edit_mode {
+                match entry.expected_outcome {
+                    CorpusExpectedOutcome::Any => {}
+                    CorpusExpectedOutcome::EditMode(expected_edit_mode) => {
+                        if report.edit_mode != expected_edit_mode {
+                            problems.push(format!(
+                                "expected edit mode {}, got {}",
+                                expected_edit_mode.as_str(),
+                                report.edit_mode.as_str()
+                            ));
+                        }
+                    }
+                    CorpusExpectedOutcome::ParseError => {
                         problems.push(format!(
-                            "expected edit mode {}, got {}",
-                            expected_edit_mode.as_str(),
+                            "expected parse error, got {}",
                             report.edit_mode.as_str()
                         ));
                     }
@@ -2564,7 +2580,14 @@ fn compat_corpus(args: &[String]) {
                 }
             }
             Err(error) => {
-                problems.push(error);
+                match entry.expected_outcome {
+                    CorpusExpectedOutcome::ParseError => {
+                        edit_mode = Some("parse-error".to_string());
+                    }
+                    _ => {
+                        problems.push(error);
+                    }
+                }
             }
         }
 
@@ -2775,7 +2798,7 @@ fn load_corpus_manifest(manifest_path: &Path) -> Result<Vec<CorpusEntry>, String
             ));
         }
 
-        let expected_edit_mode = parse_expected_edit_mode(
+        let expected_outcome = parse_expected_outcome(
             columns.get(1).copied().unwrap_or_default(),
             manifest_path,
             line_idx + 1,
@@ -2790,7 +2813,7 @@ fn load_corpus_manifest(manifest_path: &Path) -> Result<Vec<CorpusEntry>, String
         );
         let roundtrip = parse_roundtrip_expectation(
             columns.get(4).copied().unwrap_or_default(),
-            expected_edit_mode,
+            expected_outcome,
             manifest_path,
             line_idx + 1,
         )?;
@@ -2805,7 +2828,7 @@ fn load_corpus_manifest(manifest_path: &Path) -> Result<Vec<CorpusEntry>, String
         entries.push(CorpusEntry {
             relative_path,
             absolute_path,
-            expected_edit_mode,
+            expected_outcome,
             expected_save_format,
             required_issue_codes,
             roundtrip,
@@ -2815,17 +2838,22 @@ fn load_corpus_manifest(manifest_path: &Path) -> Result<Vec<CorpusEntry>, String
     Ok(entries)
 }
 
-fn parse_expected_edit_mode(
+fn parse_expected_outcome(
     value: &str,
     manifest_path: &Path,
     line_number: usize,
-) -> Result<Option<rhwp::document_core::DocumentEditMode>, String> {
+) -> Result<CorpusExpectedOutcome, String> {
     match value {
-        "" => Ok(None),
-        "editable-safe" => Ok(Some(rhwp::document_core::DocumentEditMode::EditableSafe)),
-        "protected-view" => Ok(Some(rhwp::document_core::DocumentEditMode::ProtectedView)),
+        "" => Ok(CorpusExpectedOutcome::Any),
+        "editable-safe" => Ok(CorpusExpectedOutcome::EditMode(
+            rhwp::document_core::DocumentEditMode::EditableSafe,
+        )),
+        "protected-view" => Ok(CorpusExpectedOutcome::EditMode(
+            rhwp::document_core::DocumentEditMode::ProtectedView,
+        )),
+        "parse-error" => Ok(CorpusExpectedOutcome::ParseError),
         other => Err(format!(
-            "{}:{} invalid edit mode: {}",
+            "{}:{} invalid corpus outcome: {}",
             manifest_path.display(),
             line_number,
             other
@@ -2867,18 +2895,31 @@ fn parse_required_issue_codes(value: &str) -> Vec<String> {
 
 fn parse_roundtrip_expectation(
     value: &str,
-    expected_edit_mode: Option<rhwp::document_core::DocumentEditMode>,
+    expected_outcome: CorpusExpectedOutcome,
     manifest_path: &Path,
     line_number: usize,
 ) -> Result<CorpusRoundtripExpectation, String> {
     match value {
-        "" => Ok(if expected_edit_mode
-            == Some(rhwp::document_core::DocumentEditMode::EditableSafe)
+        "" => Ok(
+            if expected_outcome
+                == CorpusExpectedOutcome::EditMode(
+                    rhwp::document_core::DocumentEditMode::EditableSafe,
+                )
+            {
+                CorpusRoundtripExpectation::SaveReparse
+            } else {
+                CorpusRoundtripExpectation::None
+            },
+        ),
+        "save-reparse"
+            if expected_outcome == CorpusExpectedOutcome::ParseError =>
         {
-            CorpusRoundtripExpectation::SaveReparse
-        } else {
-            CorpusRoundtripExpectation::None
-        }),
+            Err(format!(
+                "{}:{} parse-error entries cannot request save-reparse",
+                manifest_path.display(),
+                line_number
+            ))
+        }
         "save-reparse" => Ok(CorpusRoundtripExpectation::SaveReparse),
         "none" => Ok(CorpusRoundtripExpectation::None),
         other => Err(format!(
