@@ -6,7 +6,7 @@ use zip::write::SimpleFileOptions;
 use crate::document_core::helpers::find_control_text_positions;
 use crate::model::control::{
     AutoNumber, AutoNumberType, Bookmark, Control, Equation, Field, FieldType, FormObject,
-    FormType, HiddenComment, NewNumber, PageHide, PageNumberPos, Ruby,
+    FormType, HiddenComment, Hyperlink, NewNumber, PageHide, PageNumberPos, Ruby,
 };
 use crate::model::document::{Document, Section, SectionDef};
 use crate::model::header_footer::HeaderFooterApply;
@@ -798,6 +798,51 @@ mod tests_clean {
     }
 
     #[test]
+    fn test_supported_inline_hyperlink_control_roundtrip() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let paragraph = Paragraph {
+            text: "Example".to_string(),
+            char_offsets: (8..15).collect(),
+            char_shapes: vec![CharShapeRef {
+                start_pos: 0,
+                char_shape_id: 0,
+            }],
+            controls: vec![Control::Hyperlink(Hyperlink {
+                url: "https://example.com".to_string(),
+                text: "Example".to_string(),
+            })],
+            para_shape_id: 0,
+            style_id: 0,
+            char_count: 8,
+            has_para_text: true,
+            ..Default::default()
+        };
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let bytes = serialize_hwpx(&document).expect("serialize inline hyperlink");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse inline hyperlink");
+        let para = &parsed.sections[0].paragraphs[0];
+
+        assert_eq!(para.text, "Example");
+        assert_eq!(para.field_ranges.len(), 1);
+        let Control::Field(field) = &para.controls[0] else {
+            panic!("expected hyperlink field after serialization");
+        };
+        assert_eq!(field.field_type, FieldType::Hyperlink);
+        assert_eq!(field.command, "https://example.com");
+    }
+
+    #[test]
     fn test_supported_equation_ruby_and_hidden_comment_roundtrip() {
         let mut document = Document::default();
         document.doc_info.font_faces = vec![Vec::new(); 7];
@@ -1396,8 +1441,18 @@ fn analyze_paragraph(
         );
     }
 
+    let control_positions = find_control_text_positions(para);
+
     for (control_idx, control) in para.controls.iter().enumerate() {
-        analyze_control(control, para, control_idx, section_idx, para_idx, report);
+        analyze_control(
+            control,
+            para,
+            &control_positions,
+            control_idx,
+            section_idx,
+            para_idx,
+            report,
+        );
     }
 }
 
@@ -1535,6 +1590,7 @@ fn analyze_shape_object(
 fn analyze_control(
     control: &Control,
     para: &Paragraph,
+    control_positions: &[usize],
     control_idx: usize,
     section_idx: usize,
     para_idx: usize,
@@ -1605,10 +1661,18 @@ fn analyze_control(
         Control::Shape(shape) => analyze_shape_object(shape, section_idx, para_idx, report),
         Control::Equation(_) => {}
         Control::Form(_) => {}
-        Control::Hyperlink(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-hyperlink", format!(
-            "Paragraph {} in section {} uses hyperlink controls that are not written to HWPX yet.",
-            para_idx, section_idx
-        )),
+        Control::Hyperlink(link) => {
+            if synthetic_hyperlink_range(para, control_positions, control_idx, link).is_none() {
+                report.block(
+                    HwpxIssueScope::Section(section_idx),
+                    "hwpx-hyperlink",
+                    format!(
+                        "Paragraph {} in section {} uses hyperlink controls that are not written to HWPX yet.",
+                        para_idx, section_idx
+                    ),
+                );
+            }
+        }
         Control::Ruby(_) => {}
         Control::CharOverlap(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-char-overlap", format!(
             "Paragraph {} in section {} uses character-overlap controls that are not written to HWPX yet.",
@@ -1619,6 +1683,24 @@ fn analyze_control(
             para_idx, section_idx
         )),
     }
+}
+
+fn synthetic_hyperlink_range(
+    para: &Paragraph,
+    control_positions: &[usize],
+    control_idx: usize,
+    hyperlink: &Hyperlink,
+) -> Option<(usize, usize)> {
+    let start = control_positions.get(control_idx).copied()?;
+    let len = hyperlink.text.chars().count();
+    if len == 0 {
+        return None;
+    }
+    let end = start.checked_add(len)?;
+    if end > para.text.chars().count() {
+        return None;
+    }
+    Some((start, end))
 }
 
 pub fn serialize_hwpx(doc: &Document) -> Result<Vec<u8>, SerializeError> {
@@ -2408,12 +2490,21 @@ fn serialize_paragraph_xml(
         if matches!(para.controls.get(ctrl_idx), Some(Control::Field(_))) {
             continue;
         }
+        if matches!(
+            para.controls.get(ctrl_idx),
+            Some(Control::Hyperlink(link))
+                if synthetic_hyperlink_range(para, &control_positions, ctrl_idx, link).is_some()
+        ) {
+            continue;
+        }
         controls_by_pos.entry(pos).or_default().push(ctrl_idx);
     }
 
     let mut field_starts: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     let mut field_ends: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     let mut empty_field_ends: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut hyperlink_starts: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut hyperlink_ends: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
     let mut field_boundaries = BTreeSet::new();
     for (range_idx, range) in para.field_ranges.iter().enumerate() {
         field_starts
@@ -2434,6 +2525,20 @@ fn serialize_paragraph_xml(
         field_boundaries.insert(range.start_char_idx);
         field_boundaries.insert(range.end_char_idx);
     }
+    for (ctrl_idx, control) in para.controls.iter().enumerate() {
+        let Control::Hyperlink(link) = control else {
+            continue;
+        };
+        let Some((start, end)) =
+            synthetic_hyperlink_range(para, &control_positions, ctrl_idx, link)
+        else {
+            continue;
+        };
+        hyperlink_starts.entry(start).or_default().push(ctrl_idx);
+        hyperlink_ends.entry(end).or_default().push(ctrl_idx);
+        field_boundaries.insert(start);
+        field_boundaries.insert(end);
+    }
     for ranges in field_starts.values_mut() {
         ranges.sort_by_key(|range_idx| para.field_ranges[*range_idx].control_idx);
     }
@@ -2444,6 +2549,12 @@ fn serialize_paragraph_xml(
     for ranges in empty_field_ends.values_mut() {
         ranges.sort_by_key(|range_idx| para.field_ranges[*range_idx].control_idx);
     }
+    for ranges in hyperlink_starts.values_mut() {
+        ranges.sort_unstable();
+    }
+    for ranges in hyperlink_ends.values_mut() {
+        ranges.sort_by_key(|ctrl_idx| std::cmp::Reverse(*ctrl_idx));
+    }
 
     let mut cursor = 0usize;
     while cursor <= text_chars.len() {
@@ -2452,9 +2563,22 @@ fn serialize_paragraph_xml(
                 xml.push_str(&serialize_field_end_for_range(para, *range_idx)?);
             }
         }
+        if let Some(ctrl_indices) = hyperlink_ends.get(&cursor) {
+            for ctrl_idx in ctrl_indices {
+                xml.push_str(&serialize_hyperlink_field_end_control(*ctrl_idx));
+            }
+        }
         if let Some(range_indices) = field_starts.get(&cursor) {
             for range_idx in range_indices {
                 xml.push_str(&serialize_field_begin_for_range(para, *range_idx)?);
+            }
+        }
+        if let Some(ctrl_indices) = hyperlink_starts.get(&cursor) {
+            for ctrl_idx in ctrl_indices {
+                let Control::Hyperlink(link) = &para.controls[*ctrl_idx] else {
+                    continue;
+                };
+                xml.push_str(&serialize_hyperlink_field_begin_control(link, *ctrl_idx));
             }
         }
         if let Some(range_indices) = empty_field_ends.get(&cursor) {
@@ -2861,6 +2985,33 @@ fn serialize_field_end_control(field: &Field, control_idx: usize) -> String {
     format!(
         r#"<hp:fieldEnd beginIDRef="{}" fieldid="{}"/>"#,
         ctrl_id, field_id,
+    )
+}
+
+fn serialize_hyperlink_field_begin_control(hyperlink: &Hyperlink, control_idx: usize) -> String {
+    let field = Field {
+        field_type: FieldType::Hyperlink,
+        command: hyperlink.url.clone(),
+        field_id: (control_idx as u32).saturating_add(1),
+        ctrl_id: (control_idx as u32).saturating_add(1),
+        ..Default::default()
+    };
+    format!(
+        r#"<hp:ctrl>{}</hp:ctrl>"#,
+        serialize_field_begin_control(&field, control_idx)
+    )
+}
+
+fn serialize_hyperlink_field_end_control(control_idx: usize) -> String {
+    let field = Field {
+        field_type: FieldType::Hyperlink,
+        field_id: (control_idx as u32).saturating_add(1),
+        ctrl_id: (control_idx as u32).saturating_add(1),
+        ..Default::default()
+    };
+    format!(
+        r#"<hp:ctrl>{}</hp:ctrl>"#,
+        serialize_field_end_control(&field, control_idx)
     )
 }
 

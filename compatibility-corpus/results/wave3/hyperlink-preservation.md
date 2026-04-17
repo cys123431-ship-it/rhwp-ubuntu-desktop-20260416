@@ -14,5 +14,6 @@
 
 ## Policy
 
+- Simple inline `Control::Hyperlink` cases with matching display text now serialize as native HWPX hyperlink fields.
 - Clean snapshot-backed hyperlink controls are downgraded to `warning` and stay `editable-safe`.
 - Dirty sections with hyperlink controls escalate back to `protected-view`.

@@ -141,6 +141,7 @@ jobs:
           print()
           print("### Wave 3 preservation policy")
           print("- Native hyperlink field fixture `fixtures/hyperlink-field.hwpx` is promoted to `phase1-supported`.")
+          print("- Simple inline `Control::Hyperlink` cases are rewritten as native HWPX hyperlink fields when display text is available.")
           print("- Clean snapshot-backed hyperlink controls stay `editable-safe` with `hwpx-hyperlink` as a warning.")
           print("- Clean snapshot-backed field/char-overlap controls stay `editable-safe` with `hwpx-field-missing-range` and `hwpx-char-overlap` as warnings.")
           print("- Dirty sections with hyperlink controls escalate back to `protected-view`.")
