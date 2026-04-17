@@ -508,6 +508,7 @@
     }
 
     #[test]
+    #[allow(non_snake_case)]
     fn test_merge_then_control_layout_has_colSpan() {
         let mut doc = create_doc_with_table();
         // 병합 전: colSpan=1
@@ -8290,6 +8291,7 @@
     }
 
     #[test]
+    #[allow(unused_must_use)]
     fn test_text_insert_detailed_diff() {
         // 텍스트 삽입 후 저장된 파일의 모든 레코드를 원본과 상세 비교
         let path = "template/empty.hwp";
@@ -11375,6 +11377,7 @@
     }
 
     #[test]
+    #[allow(unused_must_use)]
     fn test_textbox_render_tree_debug() {
         use std::path::Path;
         use crate::renderer::render_tree::{RenderNode, RenderNodeType};
