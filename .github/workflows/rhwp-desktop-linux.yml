@@ -87,7 +87,9 @@ jobs:
         run: cargo run --quiet --bin rhwp -- compat-corpus compatibility-corpus/phase1-supported.tsv
 
       - name: Validate phase1 protected corpus
-        run: cargo run --quiet --bin rhwp -- compat-corpus compatibility-corpus/phase1-protected.tsv
+        run: |
+          mkdir -p compatibility-reports/phase1-protected
+          cargo run --quiet --bin rhwp -- compat-corpus --json --emit-reports compatibility-reports/phase1-protected compatibility-corpus/phase1-protected.tsv > compatibility-reports/phase1-protected-summary.json
 
       - name: Validate phase2 extended corpus
         run: |
@@ -100,6 +102,9 @@ jobs:
           import json
           from pathlib import Path
 
+          protected_summary = json.loads(
+              Path("compatibility-reports/phase1-protected-summary.json").read_text(encoding="utf-8")
+          )
           summary = json.loads(Path("compatibility-reports/phase2-summary.json").read_text(encoding="utf-8"))
           entries = summary["entries"]
           protected = [entry for entry in entries if entry.get("editMode") == "protected-view"]
@@ -151,6 +156,12 @@ jobs:
           print("- Clean snapshot-backed metadata stays `editable-safe` with warning severity.")
           print("- Dirty metadata or dirty sections escalate back to `protected-view` blockers.")
           print("- Covered issue codes: `hwpx-docinfo-extra-records`, `hwpx-section-page-border-fill`, `hwpx-section-master-pages`, `hwpx-section-extra-records`, `hwpx-unknown-control`.")
+          print()
+          print("### Phase 1 protected scenarios")
+          print(f"- Manifest: `{protected_summary['manifest']}`")
+          print(f"- Total entries: `{protected_summary['totalEntries']}`")
+          for entry in protected_summary["entries"]:
+              print(f"- `{entry['path']}` -> `{entry.get('editMode', 'unknown')}`")
           if protected:
               print()
               print("### Remaining protected-view blockers")
