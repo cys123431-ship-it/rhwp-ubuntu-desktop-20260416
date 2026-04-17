@@ -346,7 +346,7 @@ export async function createHwpCtrl(options: {
     wasmDoc = options.wasmModule;
   } else {
     // 동적 로딩
-    const { default: init, HwpDocument } = await import('@wasm/rhwp.js');
+    const { default: init, HwpDocument } = await import('@wasm/rhwp');
     await init(options.wasmUrl);
     wasmDoc = HwpDocument.createEmpty();
   }

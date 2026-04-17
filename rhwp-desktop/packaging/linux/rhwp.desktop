@@ -2,6 +2,7 @@
 Name=rhwp
 Comment=Open and edit HWP and HWPX documents
 Exec=rhwp %F
+Icon=rhwp
 Terminal=false
 Type=Application
 MimeType=application/x-hwp;application/x-hwpx;
