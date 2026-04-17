@@ -768,6 +768,58 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_report_snapshot_for_preserved_unknown_control() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/preserved-unknown-control.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        let mut paragraph = Paragraph::new_empty();
+        paragraph
+            .controls
+            .push(crate::model::control::Control::Unknown(Default::default()));
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+        core.dirty_sections = vec![false];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("preserved_unknown_control_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_marks_dirty_unknown_control_as_protected() {
+        let mut core = DocumentCore::new_empty();
+        core.source_format = DocumentSourceFormat::Hwpx;
+        core.file_path = "/tmp/dirty-unknown-control.hwpx".to_string();
+        core.hwpx_package_snapshot =
+            Some(crate::parser::hwpx::reader::HwpxPackageSnapshot::default());
+        let mut paragraph = Paragraph::new_empty();
+        paragraph
+            .controls
+            .push(crate::model::control::Control::Unknown(Default::default()));
+        core.document
+            .sections
+            .push(crate::model::document::Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+        core.dirty_sections = vec![true];
+
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+        let issues = report["issues"].as_array().unwrap();
+
+        assert_eq!(report["editMode"], "protected-view");
+        assert!(issues.iter().any(|issue| {
+            issue["code"] == "hwpx-unknown-control" && issue["severity"] == "blocker"
+        }));
+    }
+
+    #[test]
     fn compatibility_report_snapshot_for_tac_img_wave2_sample() {
         let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples/tac-img-02.hwpx");
         let bytes = std::fs::read(sample).expect("read tac-img-02.hwpx");

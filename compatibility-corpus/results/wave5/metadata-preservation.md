@@ -14,8 +14,10 @@
 ## Regression anchors
 
 - Snapshot: `preserved_wave5_metadata_compatibility_report`
+- Snapshot: `preserved_unknown_control_compatibility_report`
 - Serializer test: `test_preservation_context_downgrades_wave5_metadata_until_dirty`
 - DocumentCore test: `compatibility_report_marks_dirty_wave5_metadata_as_protected`
+- DocumentCore test: `compatibility_report_marks_dirty_unknown_control_as_protected`
 
 ## Policy
 

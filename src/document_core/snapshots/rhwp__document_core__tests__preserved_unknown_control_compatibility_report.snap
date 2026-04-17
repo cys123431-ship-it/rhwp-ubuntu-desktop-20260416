@@ -1,0 +1,16 @@
+---
+source: src/document_core/mod.rs
+expression: report
+---
+{
+  "editMode": "editable-safe",
+  "issues": [
+    {
+      "code": "hwpx-unknown-control",
+      "message": "Paragraph 0 in section 0 contains unknown controls that are not written to HWPX yet.",
+      "severity": "warning"
+    }
+  ],
+  "preferredSaveFormat": "hwpx",
+  "sourceFormat": "hwpx"
+}
