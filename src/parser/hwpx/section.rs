@@ -2671,7 +2671,6 @@ fn parse_field_begin_attrs(e: &quick_xml::events::BytesStart) -> Field {
     f
 }
 /// numType 문자열 → AutoNumberType 변환
-
 fn parse_num_type(s: &str) -> AutoNumberType {
     match s {
         "PAGE" => AutoNumberType::Page,

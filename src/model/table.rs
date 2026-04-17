@@ -374,7 +374,7 @@ impl Table {
         self.rebuild_row_sizes();
 
         // 행 우선 순서 정렬
-        self.cells.sort_by(|a, b| (a.row, a.col).cmp(&(b.row, b.col)));
+        self.cells.sort_by_key(|a| (a.row, a.col));
 
         // CommonObjAttr 크기 갱신
         self.update_ctrl_dimensions();
@@ -446,7 +446,7 @@ impl Table {
         self.rebuild_row_sizes();
 
         // 행 우선 순서 정렬
-        self.cells.sort_by(|a, b| (a.row, a.col).cmp(&(b.row, b.col)));
+        self.cells.sort_by_key(|a| (a.row, a.col));
 
         // CommonObjAttr 크기 갱신
         self.update_ctrl_dimensions();
@@ -497,7 +497,7 @@ impl Table {
         self.rebuild_row_sizes();
 
         // 행 우선 순서 정렬
-        self.cells.sort_by(|a, b| (a.row, a.col).cmp(&(b.row, b.col)));
+        self.cells.sort_by_key(|a| (a.row, a.col));
 
         // CommonObjAttr 크기 갱신
         self.update_ctrl_dimensions();
@@ -558,7 +558,7 @@ impl Table {
         self.rebuild_row_sizes();
 
         // 행 우선 순서 정렬
-        self.cells.sort_by(|a, b| (a.row, a.col).cmp(&(b.row, b.col)));
+        self.cells.sort_by_key(|a| (a.row, a.col));
 
         // CommonObjAttr 크기 갱신
         self.update_ctrl_dimensions();
@@ -692,7 +692,7 @@ impl Table {
         }
 
         // 행 우선 순서 정렬
-        self.cells.sort_by(|a, b| (a.row, a.col).cmp(&(b.row, b.col)));
+        self.cells.sort_by_key(|a| (a.row, a.col));
 
         // row_sizes 갱신 (행별 실제 셀 개수)
         self.rebuild_row_sizes();
@@ -792,7 +792,7 @@ impl Table {
         }
 
         // 행 우선 순서 정렬
-        self.cells.sort_by(|a, b| (a.row, a.col).cmp(&(b.row, b.col)));
+        self.cells.sort_by_key(|a| (a.row, a.col));
 
         // row_sizes 갱신 (행별 실제 셀 개수)
         self.rebuild_row_sizes();
@@ -956,7 +956,7 @@ impl Table {
         self.col_count += extra_cols;
         self.row_count += extra_rows;
 
-        self.cells.sort_by(|a, b| (a.row, a.col).cmp(&(b.row, b.col)));
+        self.cells.sort_by_key(|a| (a.row, a.col));
         self.rebuild_row_sizes();
         self.update_ctrl_dimensions();
         self.rebuild_grid();
