@@ -259,7 +259,7 @@ jobs:
         run: |
           DEB_PATH="$(find "$PWD/dist" -type f -name '*.deb' | head -n 1)"
           test -n "$DEB_PATH"
-          sudo apt-get install -y "$DEB_PATH"
+          sudo dpkg -i "$DEB_PATH" || sudo apt-get install -y -f
 
       - name: Verify desktop integration assets
         run: |
