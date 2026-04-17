@@ -17,7 +17,7 @@ use crate::model::document::{Section, SectionDef};
 use crate::model::image::{ImageAttr, ImageEffect, CropInfo};
 use crate::model::shape::{
     CommonObjAttr, ShapeComponentAttr, DrawingObjAttr, TextBox, ShapeObject,
-    RectangleShape, EllipseShape, LineShape, ArcShape, PolygonShape, CurveShape, GroupShape,
+    RectangleShape, EllipseShape, LineShape, ArcShape, PolygonShape, CurveShape, GroupShape, Caption,
     VertRelTo, HorzRelTo, VertAlign, HorzAlign, TextWrap,
 };
 use crate::model::style::{ShapeBorderLine, Fill};
@@ -737,7 +737,7 @@ fn parse_table_caption(
     e: &quick_xml::events::BytesStart,
     reader: &mut Reader<&[u8]>,
 ) -> Result<crate::model::shape::Caption, HwpxError> {
-    use crate::model::shape::{Caption, CaptionDirection};
+    use crate::model::shape::{Caption, CaptionDirection, CaptionVertAlign};
 
     let mut caption = Caption::default();
     for attr in e.attributes().flatten() {
@@ -766,9 +766,23 @@ fn parse_table_caption(
             Ok(Event::Start(ref ce)) => {
                 let cname = ce.name();
                 let local = local_name(cname.as_ref());
-                if local == b"p" {
-                    let (para, _) = parse_paragraph(ce, reader)?;
-                    caption.paragraphs.push(para);
+                match local {
+                    b"subList" => {
+                        for attr in ce.attributes().flatten() {
+                            if attr.key.as_ref() == b"vertAlign" {
+                                caption.vert_align = match attr_str(&attr).as_str() {
+                                    "CENTER" => CaptionVertAlign::Center,
+                                    "BOTTOM" => CaptionVertAlign::Bottom,
+                                    _ => CaptionVertAlign::Top,
+                                };
+                            }
+                        }
+                    }
+                    b"p" => {
+                        let (para, _) = parse_paragraph(ce, reader)?;
+                        caption.paragraphs.push(para);
+                    }
+                    _ => {}
                 }
             }
             Ok(Event::End(ref end)) => {
@@ -983,6 +997,9 @@ fn parse_picture(
     let mut shape_attr = ShapeComponentAttr::default();
     let mut crop = CropInfo::default();
     let mut padding = crate::model::Padding::default();
+    let mut border_attr = ShapeBorderLine::default();
+    let mut border_opacity = 0u8;
+    let mut caption: Option<Caption> = None;
 
     // <hp:pic> 요소 자체의 속성 파싱
     for attr in e.attributes().flatten() {
@@ -1166,6 +1183,13 @@ fn parse_picture(
                             }
                         }
                     }
+                    b"lineShape" => {
+                        border_attr = parse_line_shape_attr(ce);
+                        border_opacity = 255;
+                    }
+                    b"caption" => {
+                        caption = Some(parse_table_caption(ce, reader)?);
+                    }
                     b"offset" => {
                         // <offset>은 개체 내부의 shape-transform 오프셋이다.
                         // shape_attr.offset_x/offset_y에 항상 저장 (그룹 내부 좌표용).
@@ -1195,6 +1219,25 @@ fn parse_picture(
                         // 그룹 내 자식의 아핀 변환 행렬 파싱
                         parse_rendering_info(reader, &mut shape_attr)?;
                     }
+                    b"flip" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"horizontal" => shape_attr.horz_flip = parse_bool(&attr),
+                                b"vertical" => shape_attr.vert_flip = parse_bool(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"rotationInfo" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"angle" => shape_attr.rotation_angle = parse_i16(&attr),
+                                b"centerX" => shape_attr.rotation_center.x = parse_i32(&attr),
+                                b"centerY" => shape_attr.rotation_center.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1216,6 +1259,11 @@ fn parse_picture(
     pic.shape_attr = shape_attr;
     pic.crop = crop;
     pic.padding = padding;
+    pic.border_attr = border_attr.clone();
+    pic.border_color = border_attr.color;
+    pic.border_width = border_attr.width;
+    pic.border_opacity = border_opacity;
+    pic.caption = caption;
 
     Ok(Control::Picture(Box::new(pic)))
 }
@@ -1684,11 +1732,53 @@ fn parse_shape_object(
     let mut border_line = ShapeBorderLine::default();
     let mut fill = Fill::default();
     let mut text_box: Option<TextBox> = None;
+    let mut caption: Option<Caption> = None;
     let mut has_pos = false;
+    let mut round_rate = 0u8;
     let mut x_coords = [0i32; 4];
     let mut y_coords = [0i32; 4];
+    let mut line_start = crate::model::Point::default();
+    let mut line_end = crate::model::Point::default();
+    let mut line_reversed = false;
+    let mut ellipse_center = crate::model::Point::default();
+    let mut ellipse_axis1 = crate::model::Point::default();
+    let mut ellipse_axis2 = crate::model::Point::default();
+    let mut ellipse_start1 = crate::model::Point::default();
+    let mut ellipse_end1 = crate::model::Point::default();
+    let mut ellipse_start2 = crate::model::Point::default();
+    let mut ellipse_end2 = crate::model::Point::default();
+    let mut ellipse_attr = 0u32;
+    let mut arc_center = crate::model::Point::default();
+    let mut arc_axis1 = crate::model::Point::default();
+    let mut arc_axis2 = crate::model::Point::default();
+    let mut arc_type = 0u8;
+    let mut polygon_points = Vec::new();
 
     parse_object_element_attrs(e, &mut common, &mut shape_attr);
+    for attr in e.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"ratio" => round_rate = parse_u8(&attr),
+            b"isReverseHV" => line_reversed = parse_bool(&attr),
+            b"intervalDirty" => {
+                if parse_bool(&attr) {
+                    ellipse_attr |= 0x1;
+                }
+            }
+            b"hasArcPr" => {
+                if parse_bool(&attr) {
+                    ellipse_attr |= 0x2;
+                }
+            }
+            b"arcType" | b"type" => {
+                arc_type = match attr_str(&attr).as_str() {
+                    "PIE" => 1,
+                    "CHORD" => 2,
+                    _ => 0,
+                };
+            }
+            _ => {}
+        }
+    }
 
     let tag_name = String::from_utf8_lossy(shape_type).to_string();
     let mut buf = Vec::new();
@@ -1708,6 +1798,9 @@ fn parse_shape_object(
                         tb.max_width = common.width;
                         parse_draw_text(reader, &mut tb)?;
                         text_box = Some(tb);
+                    }
+                    b"caption" => {
+                        caption = Some(parse_table_caption(ce, reader)?);
                     }
                     b"pt0" => {
                         for attr in ce.attributes().flatten() {
@@ -1745,11 +1838,146 @@ fn parse_shape_object(
                             }
                         }
                     }
+                    b"pt" => {
+                        let mut point = crate::model::Point::default();
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => point.x = parse_i32(&attr),
+                                b"y" => point.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                        polygon_points.push(point);
+                    }
+                    b"startPt" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => line_start.x = parse_i32(&attr),
+                                b"y" => line_start.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"endPt" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => line_end.x = parse_i32(&attr),
+                                b"y" => line_end.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"center" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => {
+                                    let value = parse_i32(&attr);
+                                    ellipse_center.x = value;
+                                    arc_center.x = value;
+                                }
+                                b"y" => {
+                                    let value = parse_i32(&attr);
+                                    ellipse_center.y = value;
+                                    arc_center.y = value;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"ax1" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => {
+                                    let value = parse_i32(&attr);
+                                    ellipse_axis1.x = value;
+                                    arc_axis1.x = value;
+                                }
+                                b"y" => {
+                                    let value = parse_i32(&attr);
+                                    ellipse_axis1.y = value;
+                                    arc_axis1.y = value;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"ax2" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => {
+                                    let value = parse_i32(&attr);
+                                    ellipse_axis2.x = value;
+                                    arc_axis2.x = value;
+                                }
+                                b"y" => {
+                                    let value = parse_i32(&attr);
+                                    ellipse_axis2.y = value;
+                                    arc_axis2.y = value;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"start1" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => ellipse_start1.x = parse_i32(&attr),
+                                b"y" => ellipse_start1.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"end1" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => ellipse_end1.x = parse_i32(&attr),
+                                b"y" => ellipse_end1.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"start2" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => ellipse_start2.x = parse_i32(&attr),
+                                b"y" => ellipse_start2.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"end2" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"x" => ellipse_end2.x = parse_i32(&attr),
+                                b"y" => ellipse_end2.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
                     b"renderingInfo" => {
                         parse_rendering_info(reader, &mut shape_attr)?;
                     }
                     b"fillBrush" => {
                         fill = parse_shape_fill_brush(reader)?;
+                    }
+                    b"flip" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"horizontal" => shape_attr.horz_flip = parse_bool(&attr),
+                                b"vertical" => shape_attr.vert_flip = parse_bool(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"rotationInfo" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"angle" => shape_attr.rotation_angle = parse_i16(&attr),
+                                b"centerX" => shape_attr.rotation_center.x = parse_i32(&attr),
+                                b"centerY" => shape_attr.rotation_center.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
                     }
                     b"shadow" => {
                         // shadow는 무시 (Start 이벤트인 경우 내부 소비)
@@ -1783,6 +2011,7 @@ fn parse_shape_object(
         border_line,
         fill,
         text_box,
+        caption,
         ..Default::default()
     };
 
@@ -1790,29 +2019,42 @@ fn parse_shape_object(
         b"rect" => ShapeObject::Rectangle(RectangleShape {
             common,
             drawing,
-            round_rate: 0,
+            round_rate,
             x_coords,
             y_coords,
         }),
         b"ellipse" => ShapeObject::Ellipse(EllipseShape {
             common,
             drawing,
-            ..Default::default()
+            attr: ellipse_attr,
+            center: ellipse_center,
+            axis1: ellipse_axis1,
+            axis2: ellipse_axis2,
+            start1: ellipse_start1,
+            end1: ellipse_end1,
+            start2: ellipse_start2,
+            end2: ellipse_end2,
         }),
         b"line" => ShapeObject::Line(LineShape {
             common,
             drawing,
-            ..Default::default()
+            start: line_start,
+            end: line_end,
+            started_right_or_bottom: line_reversed,
+            connector: None,
         }),
         b"arc" => ShapeObject::Arc(ArcShape {
             common,
             drawing,
-            ..Default::default()
+            arc_type,
+            center: arc_center,
+            axis1: arc_axis1,
+            axis2: arc_axis2,
         }),
         b"polygon" => ShapeObject::Polygon(PolygonShape {
             common,
             drawing,
-            ..Default::default()
+            points: polygon_points,
         }),
         b"curve" => ShapeObject::Curve(CurveShape {
             common,
@@ -1822,7 +2064,7 @@ fn parse_shape_object(
         _ => ShapeObject::Rectangle(RectangleShape {
             common,
             drawing,
-            round_rate: 0,
+            round_rate,
             x_coords,
             y_coords,
         }),
@@ -1842,6 +2084,7 @@ fn parse_container(
     let mut shape_attr = ShapeComponentAttr::default();
     let mut has_pos = false;
     let mut children = Vec::new();
+    let mut caption: Option<Caption> = None;
 
     parse_object_element_attrs(e, &mut common, &mut shape_attr);
 
@@ -1875,8 +2118,30 @@ fn parse_container(
                             children.push(*shape);
                         }
                     }
+                    b"caption" => {
+                        caption = Some(parse_table_caption(ce, reader)?);
+                    }
                     b"renderingInfo" => {
                         parse_rendering_info(reader, &mut shape_attr)?;
+                    }
+                    b"flip" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"horizontal" => shape_attr.horz_flip = parse_bool(&attr),
+                                b"vertical" => shape_attr.vert_flip = parse_bool(&attr),
+                                _ => {}
+                            }
+                        }
+                    }
+                    b"rotationInfo" => {
+                        for attr in ce.attributes().flatten() {
+                            match attr.key.as_ref() {
+                                b"angle" => shape_attr.rotation_angle = parse_i16(&attr),
+                                b"centerX" => shape_attr.rotation_center.x = parse_i32(&attr),
+                                b"centerY" => shape_attr.rotation_center.y = parse_i32(&attr),
+                                _ => {}
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -1898,7 +2163,7 @@ fn parse_container(
         common,
         shape_attr,
         children,
-        caption: None,
+        caption,
     };
 
     Ok(Control::Shape(Box::new(ShapeObject::Group(group))))

@@ -3,6 +3,8 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -75,14 +77,14 @@ fn print_help() {
     println!("  ir-diff <파일A.hwpx> <파일B.hwp> [-s <구역>] [-p <문단>]");
     println!("      두 파일의 IR(중간표현) 비교 (HWPX↔HWP 불일치 검출)");
     println!();
-    println!("  compat-report <file.hwp|file.hwpx>");
-    println!("      Print structured phase-1 compatibility and font substitution diagnostics");
+    println!("  compat-report [--json] <file.hwp|file.hwpx>");
+    println!("      Print structured compatibility and font substitution diagnostics");
     println!();
-    println!("  compat-corpus <manifest.tsv>");
+    println!("  compat-corpus [--json] [--emit-reports <dir>] <manifest.tsv>");
     println!("      Validate a corpus manifest with parse/save/reparse checks");
     println!();
     println!("  compat-generate-fixtures [output-dir]");
-    println!("      Generate synthetic phase-1-safe HWPX fixtures for corpus validation");
+    println!("      Generate synthetic phase-1 and wave-2 HWPX fixtures for corpus validation");
     println!();
     println!("  thumbnail <파일.hwp> [옵션]");
     println!("      HWP 파일에서 썸네일(PrvImage) 추출");
@@ -2246,38 +2248,444 @@ struct RenderSignature {
     render_tree_hashes: Vec<u64>,
 }
 
+#[derive(Debug, Clone)]
+struct CompatReportBundle {
+    report: rhwp::document_core::CompatibilityReportData,
+    fonts: rhwp::document_core::FontSubstitutionReportData,
+    render: RenderSignature,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CompatReportJson<'a> {
+    file: String,
+    #[serde(rename = "sourceFormat")]
+    source_format: &'a str,
+    #[serde(rename = "preferredSaveFormat")]
+    preferred_save_format: &'a str,
+    #[serde(rename = "editMode")]
+    edit_mode: &'a str,
+    #[serde(rename = "pageCount")]
+    page_count: u32,
+    issues: Vec<CompatIssueJson<'a>>,
+    #[serde(rename = "fontSubstitutions")]
+    font_substitutions: Vec<CompatFontSubstitutionJson<'a>>,
+    #[serde(rename = "renderSignature")]
+    render_signature: CompatRenderSignatureJson<'a>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CompatIssueJson<'a> {
+    code: &'a str,
+    severity: &'a str,
+    message: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CompatFontSubstitutionJson<'a> {
+    lang: &'a str,
+    original: &'a str,
+    resolved: &'a str,
+    substituted: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CompatRenderSignatureJson<'a> {
+    #[serde(rename = "pageCount")]
+    page_count: u32,
+    #[serde(rename = "pageInfoHashes")]
+    page_info_hashes: &'a [u64],
+    #[serde(rename = "renderTreeHashes")]
+    render_tree_hashes: &'a [u64],
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CompatCorpusEntryJson {
+    path: String,
+    passed: bool,
+    #[serde(rename = "sourceFormat", skip_serializing_if = "Option::is_none")]
+    source_format: Option<String>,
+    #[serde(rename = "preferredSaveFormat", skip_serializing_if = "Option::is_none")]
+    preferred_save_format: Option<String>,
+    #[serde(rename = "editMode", skip_serializing_if = "Option::is_none")]
+    edit_mode: Option<String>,
+    #[serde(rename = "issueCodes")]
+    issue_codes: Vec<String>,
+    #[serde(rename = "reportPath", skip_serializing_if = "Option::is_none")]
+    report_path: Option<String>,
+    problems: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CompatCorpusJson {
+    manifest: String,
+    #[serde(rename = "totalEntries")]
+    total_entries: usize,
+    failures: usize,
+    passed: bool,
+    entries: Vec<CompatCorpusEntryJson>,
+}
+
 fn compat_report(args: &[String]) {
-    if args.is_empty() {
-        eprintln!("usage: rhwp compat-report <file.hwp|file.hwpx>");
+    let mut json = false;
+    let mut file_arg: Option<&str> = None;
+
+    for arg in args {
+        match arg.as_str() {
+            "--json" => json = true,
+            value if value.starts_with('-') => {
+                eprintln!("usage: rhwp compat-report [--json] <file.hwp|file.hwpx>");
+                std::process::exit(1);
+            }
+            value => {
+                if file_arg.replace(value).is_some() {
+                    eprintln!("usage: rhwp compat-report [--json] <file.hwp|file.hwpx>");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
+    let file_path = match file_arg {
+        Some(value) => Path::new(value),
+        None => {
+            eprintln!("usage: rhwp compat-report [--json] <file.hwp|file.hwpx>");
+            std::process::exit(1);
+        }
+    };
+
+    let bundle = match load_compat_report_bundle(file_path) {
+        Ok(bundle) => bundle,
+        Err(error) => {
+            eprintln!("error: {}", error);
+            std::process::exit(1);
+        }
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&compat_report_json(file_path, &bundle))
+                .expect("serialize compat report json"),
+        );
+    } else {
+        print_compat_report_text(file_path, &bundle);
+    }
+}
+
+fn compat_corpus(args: &[String]) {
+    let mut json = false;
+    let mut emit_reports: Option<PathBuf> = None;
+    let mut manifest_arg: Option<&str> = None;
+    let mut idx = 0usize;
+
+    while idx < args.len() {
+        match args[idx].as_str() {
+            "--json" => {
+                json = true;
+                idx += 1;
+            }
+            "--emit-reports" => {
+                let Some(dir) = args.get(idx + 1) else {
+                    eprintln!("usage: rhwp compat-corpus [--json] [--emit-reports <dir>] <manifest.tsv>");
+                    std::process::exit(1);
+                };
+                emit_reports = Some(PathBuf::from(dir));
+                idx += 2;
+            }
+            value if value.starts_with('-') => {
+                eprintln!("usage: rhwp compat-corpus [--json] [--emit-reports <dir>] <manifest.tsv>");
+                std::process::exit(1);
+            }
+            value => {
+                if manifest_arg.replace(value).is_some() {
+                    eprintln!("usage: rhwp compat-corpus [--json] [--emit-reports <dir>] <manifest.tsv>");
+                    std::process::exit(1);
+                }
+                idx += 1;
+            }
+        }
+    }
+
+    let manifest_path = match manifest_arg {
+        Some(value) => Path::new(value),
+        None => {
+            eprintln!("usage: rhwp compat-corpus [--json] [--emit-reports <dir>] <manifest.tsv>");
+            std::process::exit(1);
+        }
+    };
+    let entries = match load_corpus_manifest(manifest_path) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("error: {}", error);
+            std::process::exit(1);
+        }
+    };
+
+    if entries.is_empty() {
+        eprintln!("error: corpus manifest has no entries: {}", manifest_path.display());
         std::process::exit(1);
     }
 
-    let file_path = Path::new(&args[0]);
-    let data = match fs::read(file_path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            eprintln!("error: failed to read {}: {}", file_path.display(), error);
+    if let Some(report_dir) = emit_reports.as_ref() {
+        if let Err(error) = fs::create_dir_all(report_dir) {
+            eprintln!("error: failed to create {}: {}", report_dir.display(), error);
             std::process::exit(1);
         }
-    };
+    }
 
-    let core = match rhwp::document_core::DocumentCore::from_bytes(&data) {
-        Ok(core) => core,
-        Err(error) => {
-            eprintln!("error: failed to parse {}: {}", file_path.display(), error);
-            std::process::exit(1);
+    if !json {
+        println!(
+            "compat-corpus: {} entries from {}",
+            entries.len(),
+            manifest_path.display()
+        );
+    }
+
+    let mut failures = 0usize;
+    let mut json_entries = Vec::new();
+    for entry in entries {
+        let mut problems = Vec::new();
+        let mut source_format = None;
+        let mut preferred_save_format = None;
+        let mut edit_mode = None;
+        let mut issue_codes = Vec::new();
+        let mut report_path = None;
+
+        let data = match fs::read(&entry.absolute_path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                problems.push(format!("failed to read fixture: {}", error));
+                failures += 1;
+                if !json {
+                    eprintln!(
+                        "FAIL {}: failed to read fixture: {}",
+                        entry.relative_path.display(),
+                        error
+                    );
+                }
+                json_entries.push(CompatCorpusEntryJson {
+                    path: entry.relative_path.display().to_string(),
+                    passed: false,
+                    source_format,
+                    preferred_save_format,
+                    edit_mode,
+                    issue_codes,
+                    report_path,
+                    problems,
+                });
+                continue;
+            }
+        };
+
+        match load_compat_report_bundle(&entry.absolute_path) {
+            Ok(bundle) => {
+                let report = &bundle.report;
+                source_format = Some(report.source_format.as_str().to_string());
+                preferred_save_format = Some(report.preferred_save_format.as_str().to_string());
+                edit_mode = Some(report.edit_mode.as_str().to_string());
+                issue_codes = report
+                    .issues
+                    .iter()
+                    .map(|issue| issue.code.to_string())
+                    .collect::<Vec<_>>();
+
+                let actual_codes = report
+                    .issues
+                    .iter()
+                    .map(|issue| issue.code)
+                    .collect::<Vec<_>>();
+
+                if let Some(expected_edit_mode) = entry.expected_edit_mode {
+                    if report.edit_mode != expected_edit_mode {
+                        problems.push(format!(
+                            "expected edit mode {}, got {}",
+                            expected_edit_mode.as_str(),
+                            report.edit_mode.as_str()
+                        ));
+                    }
+                }
+
+                if let Some(expected_save_format) = entry.expected_save_format {
+                    if report.preferred_save_format != expected_save_format {
+                        problems.push(format!(
+                            "expected preferred save format {}, got {}",
+                            expected_save_format.as_str(),
+                            report.preferred_save_format.as_str()
+                        ));
+                    }
+                }
+
+                for required_code in &entry.required_issue_codes {
+                    if !actual_codes.iter().any(|code| code == required_code) {
+                        problems.push(format!("missing required issue code {}", required_code));
+                    }
+                }
+
+                if entry.roundtrip == CorpusRoundtripExpectation::SaveReparse {
+                    let core = match rhwp::document_core::DocumentCore::from_bytes(&data) {
+                        Ok(core) => core,
+                        Err(error) => {
+                            problems.push(format!("failed to reconstruct core for roundtrip: {}", error));
+                            failures += 1;
+                            if !json {
+                                eprintln!("FAIL {}", entry.relative_path.display());
+                                for problem in &problems {
+                                    eprintln!("  - {}", problem);
+                                }
+                            }
+                            json_entries.push(CompatCorpusEntryJson {
+                                path: entry.relative_path.display().to_string(),
+                                passed: false,
+                                source_format,
+                                preferred_save_format,
+                                edit_mode,
+                                issue_codes,
+                                report_path,
+                                problems,
+                            });
+                            continue;
+                        }
+                    };
+
+                    if let Err(error) = validate_roundtrip(&core, report, &bundle.render) {
+                        problems.push(error);
+                    }
+                }
+
+                if let Some(report_dir) = emit_reports.as_ref() {
+                    match write_compat_report_json_file(report_dir, &entry.relative_path, &entry.absolute_path, &bundle) {
+                        Ok(path) => {
+                            report_path = Some(path.display().to_string());
+                        }
+                        Err(error) => {
+                            problems.push(format!("failed to write report artifact: {}", error));
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                problems.push(error);
+            }
         }
+
+        if problems.is_empty() {
+            if !json {
+                println!(
+                    "OK   {} ({}, {}, {} issues)",
+                    entry.relative_path.display(),
+                    source_format.as_deref().unwrap_or("unknown"),
+                    edit_mode.as_deref().unwrap_or("unknown"),
+                    issue_codes.len()
+                );
+            }
+        } else {
+            failures += 1;
+            if !json {
+                eprintln!("FAIL {}", entry.relative_path.display());
+                for problem in &problems {
+                    eprintln!("  - {}", problem);
+                }
+            }
+        }
+
+        json_entries.push(CompatCorpusEntryJson {
+            path: entry.relative_path.display().to_string(),
+            passed: problems.is_empty(),
+            source_format,
+            preferred_save_format,
+            edit_mode,
+            issue_codes,
+            report_path,
+            problems,
+        });
+    }
+
+    let summary = CompatCorpusJson {
+        manifest: manifest_path.display().to_string(),
+        total_entries: json_entries.len(),
+        failures,
+        passed: failures == 0,
+        entries: json_entries,
     };
 
+    if failures > 0 {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&summary).expect("serialize compat corpus json"),
+            );
+        } else {
+            eprintln!("compat-corpus: {} failing entries", failures);
+        }
+        std::process::exit(1);
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&summary).expect("serialize compat corpus json"),
+        );
+    } else {
+        println!("compat-corpus: all entries passed");
+    }
+}
+
+fn load_compat_report_bundle(file_path: &Path) -> Result<CompatReportBundle, String> {
+    let data = fs::read(file_path)
+        .map_err(|error| format!("failed to read {}: {}", file_path.display(), error))?;
+    let core = rhwp::document_core::DocumentCore::from_bytes(&data)
+        .map_err(|error| format!("failed to parse {}: {}", file_path.display(), error))?;
     let report = core.compatibility_report_data();
     let fonts = core.font_substitution_report_data();
-    let render = match capture_render_signature(&data) {
-        Ok(signature) => signature,
-        Err(error) => {
-            eprintln!("error: failed to render {}: {}", file_path.display(), error);
-            std::process::exit(1);
-        }
-    };
+    let render = capture_render_signature(&data)
+        .map_err(|error| format!("failed to render {}: {}", file_path.display(), error))?;
+
+    Ok(CompatReportBundle { report, fonts, render })
+}
+
+fn compat_report_json<'a>(
+    file_path: &Path,
+    bundle: &'a CompatReportBundle,
+) -> CompatReportJson<'a> {
+    CompatReportJson {
+        file: file_path.display().to_string(),
+        source_format: bundle.report.source_format.as_str(),
+        preferred_save_format: bundle.report.preferred_save_format.as_str(),
+        edit_mode: bundle.report.edit_mode.as_str(),
+        page_count: bundle.render.page_count,
+        issues: bundle
+            .report
+            .issues
+            .iter()
+            .map(|issue| CompatIssueJson {
+                code: issue.code,
+                severity: issue.severity,
+                message: issue.message.as_str(),
+            })
+            .collect(),
+        font_substitutions: bundle
+            .fonts
+            .items
+            .iter()
+            .map(|item| CompatFontSubstitutionJson {
+                lang: item.lang.as_str(),
+                original: item.original.as_str(),
+                resolved: item.resolved.as_str(),
+                substituted: item.substituted,
+            })
+            .collect(),
+        render_signature: CompatRenderSignatureJson {
+            page_count: bundle.render.page_count,
+            page_info_hashes: &bundle.render.page_info_hashes,
+            render_tree_hashes: &bundle.render.render_tree_hashes,
+        },
+    }
+}
+
+fn print_compat_report_text(file_path: &Path, bundle: &CompatReportBundle) {
+    let report = &bundle.report;
+    let fonts = &bundle.fonts;
+    let render = &bundle.render;
 
     println!("file: {}", file_path.display());
     println!("sourceFormat: {}", report.source_format.as_str());
@@ -2311,138 +2719,33 @@ fn compat_report(args: &[String]) {
     println!("  renderTreeHashes: {:?}", render.render_tree_hashes);
 }
 
-fn compat_corpus(args: &[String]) {
-    if args.is_empty() {
-        eprintln!("usage: rhwp compat-corpus <manifest.tsv>");
-        std::process::exit(1);
+fn write_compat_report_json_file(
+    output_dir: &Path,
+    relative_path: &Path,
+    absolute_path: &Path,
+    bundle: &CompatReportBundle,
+) -> Result<PathBuf, String> {
+    let output_path = output_dir.join(sanitized_report_file_name(relative_path));
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {}", parent.display(), error))?;
     }
 
-    let manifest_path = Path::new(&args[0]);
-    let entries = match load_corpus_manifest(manifest_path) {
-        Ok(entries) => entries,
-        Err(error) => {
-            eprintln!("error: {}", error);
-            std::process::exit(1);
-        }
-    };
+    let json = serde_json::to_vec_pretty(&compat_report_json(absolute_path, bundle))
+        .map_err(|error| format!("failed to serialize report for {}: {}", relative_path.display(), error))?;
+    fs::write(&output_path, json)
+        .map_err(|error| format!("failed to write {}: {}", output_path.display(), error))?;
+    Ok(output_path)
+}
 
-    if entries.is_empty() {
-        eprintln!("error: corpus manifest has no entries: {}", manifest_path.display());
-        std::process::exit(1);
-    }
-
-    println!(
-        "compat-corpus: {} entries from {}",
-        entries.len(),
-        manifest_path.display()
-    );
-
-    let mut failures = 0usize;
-    for entry in entries {
-        let mut problems = Vec::new();
-
-        let data = match fs::read(&entry.absolute_path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                eprintln!(
-                    "FAIL {}: failed to read fixture: {}",
-                    entry.relative_path.display(),
-                    error
-                );
-                failures += 1;
-                continue;
-            }
-        };
-
-        let core = match rhwp::document_core::DocumentCore::from_bytes(&data) {
-            Ok(core) => core,
-            Err(error) => {
-                eprintln!(
-                    "FAIL {}: failed to parse fixture: {}",
-                    entry.relative_path.display(),
-                    error
-                );
-                failures += 1;
-                continue;
-            }
-        };
-
-        let report = core.compatibility_report_data();
-        let actual_codes = report
-            .issues
-            .iter()
-            .map(|issue| issue.code)
-            .collect::<Vec<_>>();
-
-        if let Some(expected_edit_mode) = entry.expected_edit_mode {
-            if report.edit_mode != expected_edit_mode {
-                problems.push(format!(
-                    "expected edit mode {}, got {}",
-                    expected_edit_mode.as_str(),
-                    report.edit_mode.as_str()
-                ));
-            }
-        }
-
-        if let Some(expected_save_format) = entry.expected_save_format {
-            if report.preferred_save_format != expected_save_format {
-                problems.push(format!(
-                    "expected preferred save format {}, got {}",
-                    expected_save_format.as_str(),
-                    report.preferred_save_format.as_str()
-                ));
-            }
-        }
-
-        for required_code in &entry.required_issue_codes {
-            if !actual_codes.iter().any(|code| code == required_code) {
-                problems.push(format!("missing required issue code {}", required_code));
-            }
-        }
-
-        if entry.roundtrip == CorpusRoundtripExpectation::SaveReparse {
-            let original_signature = match capture_render_signature(&data) {
-                Ok(signature) => signature,
-                Err(error) => {
-                    problems.push(format!("failed to capture original render signature: {}", error));
-                    RenderSignature {
-                        page_count: 0,
-                        page_info_hashes: Vec::new(),
-                        render_tree_hashes: Vec::new(),
-                    }
-                }
-            };
-
-            if problems.is_empty() {
-                if let Err(error) = validate_roundtrip(&core, &report, &original_signature) {
-                    problems.push(error);
-                }
-            }
-        }
-
-        if problems.is_empty() {
-            println!(
-                "OK   {} ({}, {}, {} issues)",
-                entry.relative_path.display(),
-                report.source_format.as_str(),
-                report.edit_mode.as_str(),
-                report.issues.len()
-            );
-        } else {
-            failures += 1;
-            eprintln!("FAIL {}", entry.relative_path.display());
-            for problem in problems {
-                eprintln!("  - {}", problem);
-            }
-        }
-    }
-
-    if failures > 0 {
-        eprintln!("compat-corpus: {} failing entries", failures);
-        std::process::exit(1);
-    }
-
-    println!("compat-corpus: all entries passed");
+fn sanitized_report_file_name(relative_path: &Path) -> String {
+    let raw = relative_path
+        .display()
+        .to_string()
+        .replace("../", "up__")
+        .replace("..\\", "up__")
+        .replace(['/', '\\', ':'], "__");
+    format!("{raw}.json")
 }
 
 fn load_corpus_manifest(manifest_path: &Path) -> Result<Vec<CorpusEntry>, String> {
@@ -2698,20 +3001,53 @@ fn compat_generate_fixtures(args: &[String]) {
         std::process::exit(1);
     }
 
-    let fixtures = vec![
+    let document_fixtures = vec![
         ("phase1-basic-text.hwpx", build_basic_text_fixture()),
         ("phase1-number-bullet.hwpx", build_bullet_fixture()),
         ("phase1-clickhere-field.hwpx", build_clickhere_field_fixture()),
         ("phase1-note-pair.hwpx", build_note_pair_fixture()),
         ("phase1-header-footer.hwpx", build_header_footer_fixture()),
+        ("basic-shape.hwpx", build_basic_shape_fixture()),
+        ("textbox-in-shape.hwpx", build_textbox_shape_fixture()),
+        ("picture-caption.hwpx", build_picture_caption_fixture()),
+        ("shape-group.hwpx", build_shape_group_fixture()),
     ];
 
-    for (file_name, document) in fixtures {
+    for (file_name, document) in document_fixtures {
         let output_path = output_dir.join(file_name);
         let bytes = match rhwp::serializer::serialize_hwpx(&document) {
             Ok(bytes) => bytes,
             Err(error) => {
                 eprintln!("error: failed to serialize {}: {}", output_path.display(), error);
+                std::process::exit(1);
+            }
+        };
+
+        if let Err(error) = fs::write(&output_path, &bytes) {
+            eprintln!("error: failed to write {}: {}", output_path.display(), error);
+            std::process::exit(1);
+        }
+
+        println!("generated {} ({} bytes)", output_path.display(), bytes.len());
+    }
+
+    let byte_fixtures = vec![
+        (
+            "unsupported-shape-clean-section.hwpx",
+            build_unsupported_shape_fixture_bytes(),
+        ),
+        (
+            "unsupported-shape-dirty-section.hwpx",
+            build_unsupported_shape_fixture_bytes(),
+        ),
+    ];
+
+    for (file_name, bytes) in byte_fixtures {
+        let output_path = output_dir.join(file_name);
+        let bytes = match bytes {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("error: failed to build {}: {}", output_path.display(), error);
                 std::process::exit(1);
             }
         };
@@ -2836,6 +3172,451 @@ fn build_header_footer_fixture() -> rhwp::model::document::Document {
 
     document.sections.push(fixture_section(vec![paragraph]));
     document
+}
+
+fn build_basic_shape_fixture() -> rhwp::model::document::Document {
+    let mut document = new_fixture_document();
+    let paragraph = fixture_shape_paragraph(vec![
+        rhwp::model::control::Control::Shape(Box::new(rhwp::model::shape::ShapeObject::Line(
+            fixture_line_shape(0x4100_0001),
+        ))),
+        rhwp::model::control::Control::Shape(Box::new(
+            rhwp::model::shape::ShapeObject::Rectangle(fixture_rectangle_shape(
+                0x4100_0002,
+                None,
+                None,
+            )),
+        )),
+        rhwp::model::control::Control::Shape(Box::new(rhwp::model::shape::ShapeObject::Ellipse(
+            fixture_ellipse_shape(0x4100_0003),
+        ))),
+        rhwp::model::control::Control::Shape(Box::new(rhwp::model::shape::ShapeObject::Arc(
+            fixture_arc_shape(0x4100_0004),
+        ))),
+        rhwp::model::control::Control::Shape(Box::new(
+            rhwp::model::shape::ShapeObject::Polygon(fixture_polygon_shape(0x4100_0005)),
+        )),
+    ]);
+    document.sections.push(fixture_section(vec![paragraph]));
+    document
+}
+
+fn build_textbox_shape_fixture() -> rhwp::model::document::Document {
+    let mut document = new_fixture_document();
+    let text_box = rhwp::model::shape::TextBox {
+        list_attr: 0x20,
+        vertical_align: rhwp::model::table::VerticalAlign::Top,
+        margin_left: 283,
+        margin_right: 283,
+        margin_top: 283,
+        margin_bottom: 283,
+        max_width: 9600,
+        raw_list_header_extra: vec![0; 13],
+        paragraphs: vec![fixture_paragraph("Shape TextBox", 0)],
+    };
+    let paragraph = fixture_shape_paragraph(vec![rhwp::model::control::Control::Shape(Box::new(
+        rhwp::model::shape::ShapeObject::Rectangle(fixture_rectangle_shape(
+            0x4100_0006,
+            Some(text_box),
+            None,
+        )),
+    ))]);
+    document.sections.push(fixture_section(vec![paragraph]));
+    document
+}
+
+fn build_picture_caption_fixture() -> rhwp::model::document::Document {
+    let mut document = new_fixture_document();
+    let paragraph = fixture_shape_paragraph(vec![rhwp::model::control::Control::Picture(Box::new(
+        fixture_picture(
+            0x4100_0007,
+            Some(fixture_caption("Picture caption")),
+        ),
+    ))]);
+    document.sections.push(fixture_section(vec![paragraph]));
+    document
+}
+
+fn build_shape_group_fixture() -> rhwp::model::document::Document {
+    let mut document = new_fixture_document();
+    let mut child_rect = rhwp::model::shape::ShapeObject::Rectangle(fixture_rectangle_shape(
+        0x4100_0011,
+        Some(rhwp::model::shape::TextBox {
+            list_attr: 0x20,
+            vertical_align: rhwp::model::table::VerticalAlign::Top,
+            margin_left: 200,
+            margin_right: 200,
+            margin_top: 200,
+            margin_bottom: 200,
+            max_width: 6400,
+            raw_list_header_extra: vec![0; 13],
+            paragraphs: vec![fixture_paragraph("Grouped box", 0)],
+        }),
+        None,
+    ));
+    child_rect.common_mut().horizontal_offset = 400;
+    child_rect.common_mut().vertical_offset = 300;
+    match &mut child_rect {
+        rhwp::model::shape::ShapeObject::Rectangle(rect) => {
+            rect.drawing.shape_attr.offset_x = 400;
+            rect.drawing.shape_attr.offset_y = 300;
+            rect.drawing.shape_attr.group_level = 1;
+        }
+        _ => unreachable!(),
+    }
+
+    let mut child_picture = rhwp::model::shape::ShapeObject::Picture(Box::new(fixture_picture(
+        0x4100_0012,
+        Some(fixture_caption("Grouped picture")),
+    )));
+    child_picture.common_mut().horizontal_offset = 7600;
+    child_picture.common_mut().vertical_offset = 1200;
+    if let rhwp::model::shape::ShapeObject::Picture(picture) = &mut child_picture {
+        picture.shape_attr.offset_x = 7600;
+        picture.shape_attr.offset_y = 1200;
+        picture.shape_attr.group_level = 1;
+    }
+
+    let group = rhwp::model::shape::GroupShape {
+        common: fixture_shape_common(0x2463_6f6e, 18000, 9600, 0x4100_0010, 0, 0, 1),
+        shape_attr: fixture_shape_component(0x2463_6f6e, 18000, 9600, 1),
+        children: vec![child_rect, child_picture],
+        caption: Some(fixture_caption("Wave 2 group")),
+    };
+
+    let paragraph = fixture_shape_paragraph(vec![rhwp::model::control::Control::Shape(Box::new(
+        rhwp::model::shape::ShapeObject::Group(group),
+    ))]);
+    document.sections.push(fixture_section(vec![paragraph]));
+    document
+}
+
+fn build_unsupported_shape_fixture_bytes() -> Result<Vec<u8>, String> {
+    let base = rhwp::serializer::serialize_hwpx(&build_basic_shape_fixture())
+        .map_err(|error| format!("serialize base unsupported-shape fixture: {}", error))?;
+    rewrite_hwpx_section_xml(&base, |xml| {
+        let updated = xml
+            .replacen("<hp:line ", "<hp:connectLine ", 1)
+            .replacen("</hp:line>", "</hp:connectLine>", 1);
+        if updated == xml {
+            Err("failed to inject unsupported connectLine payload".to_string())
+        } else {
+            Ok(updated)
+        }
+    })
+}
+
+fn rewrite_hwpx_section_xml<F>(bytes: &[u8], transform: F) -> Result<Vec<u8>, String>
+where
+    F: FnOnce(String) -> Result<String, String>,
+{
+    use std::io::{Cursor, Read, Write};
+
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
+        .map_err(|error| format!("open hwpx archive: {}", error))?;
+    let mut output = Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut output);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        let mut transformed = Some(transform);
+        for index in 0..archive.len() {
+            let mut file = archive
+                .by_index(index)
+                .map_err(|error| format!("read hwpx entry {}: {}", index, error))?;
+            let name = file.name().to_string();
+            let mut contents = Vec::new();
+            file.read_to_end(&mut contents)
+                .map_err(|error| format!("read hwpx entry {} contents: {}", name, error))?;
+
+            writer
+                .start_file(name.clone(), options)
+                .map_err(|error| format!("start rewritten entry {}: {}", name, error))?;
+            if name == "Contents/section0.xml" {
+                let xml = String::from_utf8(contents)
+                    .map_err(|error| format!("decode {} as utf-8: {}", name, error))?;
+                let updated = transformed
+                    .take()
+                    .expect("section transform used once")(xml)?;
+                writer
+                    .write_all(updated.as_bytes())
+                    .map_err(|error| format!("write transformed {}: {}", name, error))?;
+            } else {
+                writer
+                    .write_all(&contents)
+                    .map_err(|error| format!("copy {}: {}", name, error))?;
+            }
+        }
+
+        writer
+            .finish()
+            .map_err(|error| format!("finalize rewritten hwpx archive: {}", error))?;
+    }
+
+    Ok(output.into_inner())
+}
+
+fn fixture_shape_paragraph(
+    controls: Vec<rhwp::model::control::Control>,
+) -> rhwp::model::paragraph::Paragraph {
+    rhwp::model::paragraph::Paragraph {
+        char_count: 1,
+        controls,
+        ..rhwp::model::paragraph::Paragraph::new_empty()
+    }
+}
+
+fn fixture_shape_common(
+    ctrl_id: u32,
+    width: u32,
+    height: u32,
+    instance_id: u32,
+    horizontal_offset: u32,
+    vertical_offset: u32,
+    z_order: i32,
+) -> rhwp::model::shape::CommonObjAttr {
+    rhwp::model::shape::CommonObjAttr {
+        ctrl_id,
+        width,
+        height,
+        instance_id,
+        horizontal_offset,
+        vertical_offset,
+        z_order,
+        margin: rhwp::model::Padding::default(),
+        treat_as_char: false,
+        vert_rel_to: rhwp::model::shape::VertRelTo::Paper,
+        vert_align: rhwp::model::shape::VertAlign::Top,
+        horz_rel_to: rhwp::model::shape::HorzRelTo::Paper,
+        horz_align: rhwp::model::shape::HorzAlign::Left,
+        text_wrap: rhwp::model::shape::TextWrap::Square,
+        width_criterion: rhwp::model::shape::SizeCriterion::Absolute,
+        height_criterion: rhwp::model::shape::SizeCriterion::Absolute,
+        description: format!("Wave 2 fixture {:08x}", instance_id),
+        ..Default::default()
+    }
+}
+
+fn fixture_shape_component(
+    ctrl_id: u32,
+    width: u32,
+    height: u32,
+    group_level: u16,
+) -> rhwp::model::shape::ShapeComponentAttr {
+    rhwp::model::shape::ShapeComponentAttr {
+        ctrl_id,
+        is_two_ctrl_id: true,
+        original_width: width,
+        original_height: height,
+        current_width: width,
+        current_height: height,
+        group_level,
+        local_file_version: 1,
+        rotation_center: rhwp::model::Point {
+            x: (width / 2) as i32,
+            y: (height / 2) as i32,
+        },
+        render_sx: 1.0,
+        render_sy: 1.0,
+        ..Default::default()
+    }
+}
+
+fn fixture_border_line() -> rhwp::model::style::ShapeBorderLine {
+    rhwp::model::style::ShapeBorderLine {
+        color: 0x000000,
+        width: 33,
+        attr: 0xD1000041,
+        outline_style: 0,
+    }
+}
+
+fn fixture_solid_fill() -> rhwp::model::style::Fill {
+    rhwp::model::style::Fill {
+        fill_type: rhwp::model::style::FillType::Solid,
+        solid: Some(rhwp::model::style::SolidFill {
+            background_color: 0x00F6F6F6,
+            pattern_color: 0,
+            pattern_type: -1,
+        }),
+        gradient: None,
+        image: None,
+        alpha: 0,
+    }
+}
+
+fn fixture_drawing_attr(
+    ctrl_id: u32,
+    width: u32,
+    height: u32,
+    instance_id: u32,
+    text_box: Option<rhwp::model::shape::TextBox>,
+    caption: Option<rhwp::model::shape::Caption>,
+) -> rhwp::model::shape::DrawingObjAttr {
+    rhwp::model::shape::DrawingObjAttr {
+        shape_attr: fixture_shape_component(ctrl_id, width, height, 0),
+        border_line: fixture_border_line(),
+        fill: fixture_solid_fill(),
+        inst_id: (instance_id & 0x3FFF_FFFF) + 1,
+        text_box,
+        caption,
+        ..Default::default()
+    }
+}
+
+fn fixture_line_shape(instance_id: u32) -> rhwp::model::shape::LineShape {
+    let width = 14400;
+    let height = 7200;
+    rhwp::model::shape::LineShape {
+        common: fixture_shape_common(0x246c_696e, width, height, instance_id, 1200, 1200, 1),
+        drawing: fixture_drawing_attr(0x246c_696e, width, height, instance_id, None, None),
+        start: rhwp::model::Point { x: 0, y: 0 },
+        end: rhwp::model::Point {
+            x: width as i32,
+            y: height as i32,
+        },
+        started_right_or_bottom: false,
+        connector: None,
+    }
+}
+
+fn fixture_rectangle_shape(
+    instance_id: u32,
+    text_box: Option<rhwp::model::shape::TextBox>,
+    caption: Option<rhwp::model::shape::Caption>,
+) -> rhwp::model::shape::RectangleShape {
+    let width = 9600;
+    let height = 6400;
+    rhwp::model::shape::RectangleShape {
+        common: fixture_shape_common(0x2472_6563, width, height, instance_id, 1800, 1800, 1),
+        drawing: fixture_drawing_attr(0x2472_6563, width, height, instance_id, text_box, caption),
+        round_rate: 20,
+        x_coords: [0, width as i32, width as i32, 0],
+        y_coords: [0, 0, height as i32, height as i32],
+    }
+}
+
+fn fixture_ellipse_shape(instance_id: u32) -> rhwp::model::shape::EllipseShape {
+    let width = 8800;
+    let height = 6200;
+    rhwp::model::shape::EllipseShape {
+        common: fixture_shape_common(0x2465_6c6c, width, height, instance_id, 2200, 2200, 1),
+        drawing: fixture_drawing_attr(0x2465_6c6c, width, height, instance_id, None, None),
+        attr: 0,
+        center: rhwp::model::Point {
+            x: (width / 2) as i32,
+            y: (height / 2) as i32,
+        },
+        axis1: rhwp::model::Point {
+            x: width as i32,
+            y: (height / 2) as i32,
+        },
+        axis2: rhwp::model::Point {
+            x: (width / 2) as i32,
+            y: height as i32,
+        },
+        start1: rhwp::model::Point {
+            x: width as i32,
+            y: (height / 2) as i32,
+        },
+        end1: rhwp::model::Point {
+            x: width as i32,
+            y: (height / 2) as i32,
+        },
+        start2: rhwp::model::Point {
+            x: (width / 2) as i32,
+            y: height as i32,
+        },
+        end2: rhwp::model::Point {
+            x: (width / 2) as i32,
+            y: height as i32,
+        },
+    }
+}
+
+fn fixture_arc_shape(instance_id: u32) -> rhwp::model::shape::ArcShape {
+    let width = 9000;
+    let height = 5600;
+    rhwp::model::shape::ArcShape {
+        common: fixture_shape_common(0x2461_7263, width, height, instance_id, 2600, 2600, 1),
+        drawing: fixture_drawing_attr(0x2461_7263, width, height, instance_id, None, None),
+        arc_type: 0,
+        center: rhwp::model::Point {
+            x: (width / 2) as i32,
+            y: (height / 2) as i32,
+        },
+        axis1: rhwp::model::Point {
+            x: width as i32,
+            y: (height / 2) as i32,
+        },
+        axis2: rhwp::model::Point {
+            x: (width / 2) as i32,
+            y: height as i32,
+        },
+    }
+}
+
+fn fixture_polygon_shape(instance_id: u32) -> rhwp::model::shape::PolygonShape {
+    let width = 9200;
+    let height = 7000;
+    rhwp::model::shape::PolygonShape {
+        common: fixture_shape_common(0x2470_6f6c, width, height, instance_id, 3000, 3000, 1),
+        drawing: fixture_drawing_attr(0x2470_6f6c, width, height, instance_id, None, None),
+        points: vec![
+            rhwp::model::Point { x: width as i32 / 2, y: 0 },
+            rhwp::model::Point { x: width as i32, y: height as i32 / 3 },
+            rhwp::model::Point { x: (width as i32 * 3) / 4, y: height as i32 },
+            rhwp::model::Point { x: width as i32 / 4, y: height as i32 },
+            rhwp::model::Point { x: 0, y: height as i32 / 3 },
+        ],
+    }
+}
+
+fn fixture_picture(
+    instance_id: u32,
+    caption: Option<rhwp::model::shape::Caption>,
+) -> rhwp::model::image::Picture {
+    let width = 7800;
+    let height = 5200;
+    rhwp::model::image::Picture {
+        common: fixture_shape_common(0x2470_6963, width, height, instance_id, 1500, 1500, 1),
+        shape_attr: fixture_shape_component(0x2470_6963, width, height, 0),
+        border_color: 0,
+        border_width: 33,
+        border_attr: fixture_border_line(),
+        border_x: [0, width as i32, width as i32, 0],
+        border_y: [0, 0, height as i32, height as i32],
+        crop: rhwp::model::image::CropInfo {
+            left: 0,
+            top: 0,
+            right: width as i32,
+            bottom: height as i32,
+        },
+        padding: rhwp::model::Padding::default(),
+        image_attr: rhwp::model::image::ImageAttr {
+            brightness: 0,
+            contrast: 0,
+            effect: rhwp::model::image::ImageEffect::RealPic,
+            bin_data_id: 0,
+        },
+        border_opacity: 0,
+        instance_id,
+        raw_picture_extra: Vec::new(),
+        caption,
+    }
+}
+
+fn fixture_caption(text: &str) -> rhwp::model::shape::Caption {
+    rhwp::model::shape::Caption {
+        direction: rhwp::model::shape::CaptionDirection::Bottom,
+        vert_align: rhwp::model::shape::CaptionVertAlign::Top,
+        width: 9000,
+        spacing: 180,
+        max_width: 9000,
+        include_margin: false,
+        paragraphs: vec![fixture_paragraph(text, 0)],
+    }
 }
 
 fn new_fixture_document() -> rhwp::model::document::Document {

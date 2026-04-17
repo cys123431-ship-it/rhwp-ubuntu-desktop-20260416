@@ -9,6 +9,9 @@ Cargo.lock
 
 # Output (렌더링 결과물)
 /output/
+/compatibility-reports/
+/fuzz/artifacts/
+/fuzz/corpus/
 
 # Docker
 .docker/

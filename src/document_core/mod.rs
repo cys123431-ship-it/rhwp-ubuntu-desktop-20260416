@@ -617,6 +617,7 @@ mod tests {
     use super::*;
     use crate::model::paragraph::Paragraph;
     use crate::model::style::Font;
+    use std::path::PathBuf;
     use serde_json::Value;
 
     #[test]
@@ -666,7 +667,7 @@ mod tests {
 
         let mut paragraph = Paragraph::new_empty();
         paragraph.controls.push(crate::model::control::Control::Shape(Box::new(
-            crate::model::shape::ShapeObject::Line(Default::default()),
+            crate::model::shape::ShapeObject::Curve(Default::default()),
         )));
         core.document.sections.push(crate::model::document::Section {
             paragraphs: vec![paragraph],
@@ -675,6 +676,27 @@ mod tests {
 
         let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
         let issues = report["issues"].as_array().unwrap();
-        assert!(issues.iter().any(|issue| issue["code"] == "hwpx-shape"));
+        assert!(issues.iter().any(|issue| issue["code"] == "hwpx-shape-curve"));
+    }
+
+    #[test]
+    fn compatibility_report_snapshot_for_tac_img_wave2_sample() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("samples/tac-img-02.hwpx");
+        let bytes = std::fs::read(sample).expect("read tac-img-02.hwpx");
+        let core = DocumentCore::from_bytes(&bytes).expect("parse tac-img-02.hwpx");
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("tac_img_wave2_compatibility_report", report);
+    }
+
+    #[test]
+    fn compatibility_report_snapshot_for_form_sample() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("rhwp-studio/public/samples/form-002.hwpx");
+        let bytes = std::fs::read(sample).expect("read form-002.hwpx");
+        let core = DocumentCore::from_bytes(&bytes).expect("parse form-002.hwpx");
+        let report: Value = serde_json::from_str(&core.get_compatibility_report()).unwrap();
+
+        insta::assert_json_snapshot!("form_002_compatibility_report", report);
     }
 }

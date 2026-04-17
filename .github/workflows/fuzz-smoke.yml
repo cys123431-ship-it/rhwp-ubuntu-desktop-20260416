@@ -1,0 +1,42 @@
+name: Fuzz Smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run parse HWPX package fuzz smoke
+        run: cargo fuzz run parse_hwpx_package -- -runs=64
+
+      - name: Run HWPX save fuzz smoke
+        run: cargo fuzz run serialize_hwpx_dirty_section -- -runs=64
+
+      - name: Run compatibility-report fuzz smoke
+        run: cargo fuzz run compat_report_hwpx -- -runs=64
+
+      - name: Upload fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhwp-fuzz-artifacts
+          path: |
+            fuzz/artifacts/**
+            fuzz/corpus/**
+          if-no-files-found: ignore
+          retention-days: 14

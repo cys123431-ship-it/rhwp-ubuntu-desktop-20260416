@@ -833,7 +833,7 @@ impl DocumentCore {
 
             // TypesetEngine 병렬 검증 (Phase 1: 비-표 구역)
             #[cfg(debug_assertions)]
-            {
+            if std::env::var("TYPESET_VERIFY").is_ok() {
                 use crate::renderer::typeset::TypesetEngine;
                 let typesetter = TypesetEngine::new(self.dpi);
                 let ts_result = typesetter.typeset_section(

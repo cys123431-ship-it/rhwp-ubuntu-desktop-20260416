@@ -3,8 +3,14 @@
 ../samples/footnote-01.hwp			none
 ../samples/endnote-01.hwp			none
 ../samples/eq-01.hwp			none
-../samples/draw-group.hwp			none
+../samples/draw-group.hwp	editable-safe	hwp		save-reparse
 ../rhwp-studio/public/samples/number-bullet.hwp			none
-../rhwp-studio/public/samples/form-002.hwpx			none
-../samples/table-vpos-01.hwpx			none
-../samples/tac-img-02.hwpx			none
+../rhwp-studio/public/samples/form-002.hwpx	protected-view	hwpx	hwpx-form	none
+../samples/table-vpos-01.hwpx	protected-view	hwpx	hwpx-field-missing-range,hwpx-char-overlap	none
+../samples/tac-img-02.hwpx	editable-safe	hwpx		save-reparse
+fixtures/basic-shape.hwpx	editable-safe	hwpx		save-reparse
+fixtures/textbox-in-shape.hwpx	editable-safe	hwpx		save-reparse
+fixtures/picture-caption.hwpx	editable-safe	hwpx		save-reparse
+fixtures/shape-group.hwpx	editable-safe	hwpx		save-reparse
+fixtures/unsupported-shape-clean-section.hwpx	editable-safe	hwpx	hwpx-shape-unsupported	none
+fixtures/unsupported-shape-dirty-section.hwpx	editable-safe	hwpx	hwpx-shape-unsupported	none

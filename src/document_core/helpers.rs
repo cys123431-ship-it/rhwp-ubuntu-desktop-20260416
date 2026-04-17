@@ -340,7 +340,7 @@ pub(crate) fn json_u8_array(json: &str, key: &str) -> Option<[u8; 7]> {
     let rest = &json[pos + pattern.len()..];
     let end = rest.find(']')?;
     let nums: Vec<u8> = rest[..end].split(',')
-        .filter_map(|s| s.trim().parse().ok())
+        .filter_map(|s| s.trim().parse::<u8>().ok())
         .collect();
     if nums.len() == 7 {
         Some([nums[0], nums[1], nums[2], nums[3], nums[4], nums[5], nums[6]])
@@ -356,7 +356,7 @@ pub(crate) fn json_i8_array(json: &str, key: &str) -> Option<[i8; 7]> {
     let rest = &json[pos + pattern.len()..];
     let end = rest.find(']')?;
     let nums: Vec<i8> = rest[..end].split(',')
-        .filter_map(|s| s.trim().parse().ok())
+        .filter_map(|s| s.trim().parse::<i8>().ok())
         .collect();
     if nums.len() == 7 {
         Some([nums[0], nums[1], nums[2], nums[3], nums[4], nums[5], nums[6]])
@@ -372,7 +372,7 @@ pub(crate) fn json_u16_array(json: &str, key: &str) -> Option<[u16; 7]> {
     let rest = &json[pos + pattern.len()..];
     let end = rest.find(']')?;
     let nums: Vec<u16> = rest[..end].split(',')
-        .filter_map(|s| s.trim().parse().ok())
+        .filter_map(|s| s.trim().parse::<u16>().ok())
         .collect();
     if nums.len() == 7 {
         Some([nums[0], nums[1], nums[2], nums[3], nums[4], nums[5], nums[6]])

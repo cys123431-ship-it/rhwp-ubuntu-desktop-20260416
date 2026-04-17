@@ -13,8 +13,8 @@ use crate::model::image::{ImageEffect, Picture};
 use crate::model::page::{ColumnDef, ColumnDirection, ColumnType, PageDef};
 use crate::model::paragraph::{ColumnBreakType, Paragraph};
 use crate::model::shape::{
-    Caption, CaptionDirection, CommonObjAttr, HorzAlign, HorzRelTo, TextWrap, VertAlign,
-    VertRelTo,
+    Caption, CaptionDirection, CaptionVertAlign, CommonObjAttr, HorzAlign, HorzRelTo,
+    ShapeObject, TextWrap, VertAlign, VertRelTo,
 };
 use crate::model::style::{
     Alignment, BorderFill, BorderLine, BorderLineType, Bullet, CharShape, FillType, Font,
@@ -52,6 +52,7 @@ mod tests_clean {
     use super::*;
     use crate::model::document::Document;
     use crate::model::paragraph::{CharShapeRef, FieldRange, Paragraph};
+    use proptest::prelude::*;
 
     #[test]
     fn test_serialize_hwpx_roundtrip_text() {
@@ -85,7 +86,7 @@ mod tests_clean {
     }
 
     #[test]
-    fn test_analyze_hwpx_support_rejects_shapes() {
+    fn test_analyze_hwpx_support_allows_supported_line_shapes() {
         let mut document = Document::default();
         let mut paragraph = Paragraph::new_empty();
         paragraph.controls.push(Control::Shape(Box::new(
@@ -97,9 +98,31 @@ mod tests_clean {
         });
 
         let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+        assert!(!report
+            .issues
+            .iter()
+            .any(|issue| issue.code.starts_with("hwpx-shape")));
+    }
+
+    #[test]
+    fn test_analyze_hwpx_support_rejects_curve_shapes() {
+        let mut document = Document::default();
+        let mut paragraph = Paragraph::new_empty();
+        paragraph.controls.push(Control::Shape(Box::new(
+            crate::model::shape::ShapeObject::Curve(Default::default()),
+        )));
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
         assert!(!report.is_supported());
-        assert!(report.blockers.iter().any(|blocker| blocker.contains("drawing shapes")));
-        assert!(report.issues.iter().any(|issue| issue.code == "hwpx-shape"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "hwpx-shape-curve"));
     }
 
     #[test]
@@ -259,6 +282,185 @@ mod tests_clean {
     }
 
     #[test]
+    fn test_supported_shape_roundtrip_textbox_and_caption() {
+        let mut document = Document::default();
+        document.doc_info.font_faces = vec![Vec::new(); 7];
+        document.doc_info.char_shapes.push(CharShape::default());
+        document.doc_info.para_shapes.push(ParaShape::default());
+
+        let text_box = crate::model::shape::TextBox {
+            list_attr: 0x20,
+            vertical_align: crate::model::table::VerticalAlign::Top,
+            margin_left: 200,
+            margin_right: 200,
+            margin_top: 200,
+            margin_bottom: 200,
+            max_width: 7200,
+            raw_list_header_extra: vec![0; 13],
+            paragraphs: vec![Paragraph {
+                text: "textbox".to_string(),
+                char_offsets: (0..7).collect(),
+                char_shapes: vec![CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: 0,
+                }],
+                para_shape_id: 0,
+                style_id: 0,
+                char_count: 8,
+                has_para_text: true,
+                ..Default::default()
+            }],
+        };
+        let caption = crate::model::shape::Caption {
+            direction: crate::model::shape::CaptionDirection::Bottom,
+            vert_align: crate::model::shape::CaptionVertAlign::Top,
+            width: 7200,
+            spacing: 200,
+            max_width: 7200,
+            include_margin: false,
+            paragraphs: vec![Paragraph {
+                text: "caption".to_string(),
+                char_offsets: (0..7).collect(),
+                char_shapes: vec![CharShapeRef {
+                    start_pos: 0,
+                    char_shape_id: 0,
+                }],
+                para_shape_id: 0,
+                style_id: 0,
+                char_count: 8,
+                has_para_text: true,
+                ..Default::default()
+            }],
+        };
+        let rect = crate::model::shape::RectangleShape {
+            common: crate::model::shape::CommonObjAttr {
+                ctrl_id: 0x2472_6563,
+                width: 7200,
+                height: 4800,
+                horizontal_offset: 1200,
+                vertical_offset: 900,
+                z_order: 1,
+                instance_id: 0x4100_0101,
+                ..Default::default()
+            },
+            drawing: crate::model::shape::DrawingObjAttr {
+                shape_attr: crate::model::shape::ShapeComponentAttr {
+                    ctrl_id: 0x2472_6563,
+                    original_width: 7200,
+                    original_height: 4800,
+                    current_width: 7200,
+                    current_height: 4800,
+                    local_file_version: 1,
+                    ..Default::default()
+                },
+                border_line: crate::model::style::ShapeBorderLine {
+                    color: 0,
+                    width: 33,
+                    attr: 0xD1000041,
+                    outline_style: 0,
+                },
+                fill: crate::model::style::Fill {
+                    fill_type: FillType::Solid,
+                    solid: Some(crate::model::style::SolidFill {
+                        background_color: 0x00FF_FFFF,
+                        pattern_color: 0,
+                        pattern_type: -1,
+                    }),
+                    gradient: None,
+                    image: None,
+                    alpha: 0,
+                },
+                inst_id: 1,
+                text_box: Some(text_box),
+                caption: Some(caption),
+                ..Default::default()
+            },
+            round_rate: 15,
+            x_coords: [0, 7200, 7200, 0],
+            y_coords: [0, 0, 4800, 4800],
+        };
+
+        let mut paragraph = Paragraph::new_empty();
+        paragraph.controls.push(Control::Shape(Box::new(
+            crate::model::shape::ShapeObject::Rectangle(rect),
+        )));
+        document.sections.push(Section {
+            paragraphs: vec![paragraph],
+            ..Default::default()
+        });
+
+        let report = analyze_hwpx_support(&document);
+        assert!(report.is_supported(), "{:?}", report.blockers);
+
+        let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+        let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+        let parsed_para = &parsed.sections[0].paragraphs[0];
+        let Control::Shape(shape) = &parsed_para.controls[0] else {
+            panic!("expected shape control");
+        };
+        let crate::model::shape::ShapeObject::Rectangle(rect) = shape.as_ref() else {
+            panic!("expected rectangle shape");
+        };
+        assert_eq!(
+            rect.drawing
+                .text_box
+                .as_ref()
+                .expect("textbox")
+                .paragraphs[0]
+                .text,
+            "textbox"
+        );
+        assert_eq!(
+            rect.drawing
+                .caption
+                .as_ref()
+                .expect("caption")
+                .paragraphs[0]
+                .text,
+            "caption"
+        );
+    }
+
+    #[test]
+    fn test_clean_snapshot_only_unsupported_shape_is_warning_until_dirty() {
+        let document = Document::default();
+        let snapshot = HwpxPackageSnapshot {
+            entries: vec![crate::parser::hwpx::reader::HwpxPackageEntrySnapshot {
+                path: "Contents/section0.xml".to_string(),
+                bytes: b"<hp:section><hp:connectLine /></hp:section>".to_vec(),
+                role: HwpxPackageEntryRole::Section(0),
+                replaceable: true,
+            }],
+        };
+
+        let clean_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[false]),
+                doc_info_dirty: false,
+            },
+        );
+        assert!(clean_report.is_supported());
+        assert!(clean_report.issues.iter().any(|issue| {
+            issue.code == "hwpx-shape-unsupported" && issue.severity == HwpxIssueSeverity::Warning
+        }));
+
+        let dirty_report = analyze_hwpx_support_with_context(
+            &document,
+            HwpxPreservationContext {
+                snapshot: Some(&snapshot),
+                dirty_sections: Some(&[true]),
+                doc_info_dirty: false,
+            },
+        );
+        assert!(!dirty_report.is_supported());
+        assert!(dirty_report.issues.iter().any(|issue| {
+            issue.code == "hwpx-shape-unsupported" && issue.severity == HwpxIssueSeverity::Blocker
+        }));
+    }
+
+    #[test]
     fn test_serialize_hwpx_with_context_preserves_untouched_entries() {
         use std::io::Write;
         use zip::ZipWriter;
@@ -316,6 +518,100 @@ mod tests_clean {
             .entry("META-INF/custom.xml")
             .expect("preserved extra entry");
         assert_eq!(extra.bytes, b"<custom preserved=\"yes\"/>");
+    }
+
+    proptest! {
+        #[test]
+        fn prop_supported_rectangle_textbox_roundtrip_stays_editable_safe(text in "[A-Za-z0-9 ]{1,16}") {
+            let mut document = Document::default();
+            document.doc_info.font_faces = vec![Vec::new(); 7];
+            document.doc_info.char_shapes.push(CharShape::default());
+            document.doc_info.para_shapes.push(ParaShape::default());
+
+            let text_len = text.chars().count() as u32;
+            let text_box = crate::model::shape::TextBox {
+                list_attr: 0x20,
+                vertical_align: crate::model::table::VerticalAlign::Top,
+                margin_left: 180,
+                margin_right: 180,
+                margin_top: 180,
+                margin_bottom: 180,
+                max_width: 6400,
+                raw_list_header_extra: vec![0; 13],
+                paragraphs: vec![Paragraph {
+                    text: text.clone(),
+                    char_offsets: (0..text_len).collect(),
+                    char_shapes: vec![CharShapeRef {
+                        start_pos: 0,
+                        char_shape_id: 0,
+                    }],
+                    para_shape_id: 0,
+                    style_id: 0,
+                    char_count: text_len + 1,
+                    has_para_text: true,
+                    ..Default::default()
+                }],
+            };
+            let rect = crate::model::shape::RectangleShape {
+                common: crate::model::shape::CommonObjAttr {
+                    ctrl_id: 0x2472_6563,
+                    width: 6400,
+                    height: 4200,
+                    instance_id: 0x4100_0201,
+                    ..Default::default()
+                },
+                drawing: crate::model::shape::DrawingObjAttr {
+                    shape_attr: crate::model::shape::ShapeComponentAttr {
+                        ctrl_id: 0x2472_6563,
+                        original_width: 6400,
+                        original_height: 4200,
+                        current_width: 6400,
+                        current_height: 4200,
+                        ..Default::default()
+                    },
+                    text_box: Some(text_box),
+                    ..Default::default()
+                },
+                x_coords: [0, 6400, 6400, 0],
+                y_coords: [0, 0, 4200, 4200],
+                ..Default::default()
+            };
+
+            let mut paragraph = Paragraph::new_empty();
+            paragraph.controls.push(Control::Shape(Box::new(
+                crate::model::shape::ShapeObject::Rectangle(rect),
+            )));
+            document.sections.push(Section {
+                paragraphs: vec![paragraph],
+                ..Default::default()
+            });
+
+            let report = analyze_hwpx_support(&document);
+            prop_assert!(report.is_supported(), "{:?}", report.blockers);
+
+            let bytes = serialize_hwpx(&document).expect("serialize hwpx");
+            let parsed = crate::parser::parse_document(&bytes).expect("parse hwpx");
+            let reparsed_report = analyze_hwpx_support(&parsed);
+            prop_assert!(reparsed_report.is_supported(), "{:?}", reparsed_report.blockers);
+
+            let Control::Shape(shape) = &parsed.sections[0].paragraphs[0].controls[0] else {
+                panic!("expected shape control");
+            };
+            let crate::model::shape::ShapeObject::Rectangle(rect) = shape.as_ref() else {
+                panic!("expected rectangle shape");
+            };
+            prop_assert_eq!(
+                rect.drawing
+                    .text_box
+                    .as_ref()
+                    .expect("textbox")
+                    .paragraphs[0]
+                    .text
+                    .as_str(),
+                text
+            );
+            prop_assert_ne!(rect.common.instance_id, 0);
+        }
     }
 }
 
@@ -479,6 +775,8 @@ pub fn analyze_hwpx_support_with_context(
         return report;
     }
 
+    append_snapshot_shape_issues(&mut report, context);
+
     for issue in &mut report.issues {
         issue.severity = classify_issue_severity(issue, context);
     }
@@ -504,7 +802,10 @@ fn classify_issue_severity(
         }
         "hwpx-section-page-border-fill"
         | "hwpx-section-master-pages"
-        | "hwpx-section-extra-records" => {
+        | "hwpx-section-extra-records"
+        | "hwpx-shape-curve"
+        | "hwpx-shape-group-unsupported-child"
+        | "hwpx-shape-unsupported" => {
             if issue_scope_is_clean(issue.scope, context.dirty_sections) {
                 HwpxIssueSeverity::Warning
             } else {
@@ -524,6 +825,37 @@ fn issue_scope_is_clean(scope: HwpxIssueScope, dirty_sections: Option<&[bool]>) 
             .copied()
             .map(|dirty| !dirty)
             .unwrap_or(false),
+    }
+}
+
+fn append_snapshot_shape_issues(
+    report: &mut HwpxSupportReport,
+    context: HwpxPreservationContext<'_>,
+) {
+    let Some(snapshot) = context.snapshot else {
+        return;
+    };
+
+    for entry in &snapshot.entries {
+        let section_idx = match entry.role {
+            HwpxPackageEntryRole::Section(index) => index,
+            _ => continue,
+        };
+        let xml = String::from_utf8_lossy(&entry.bytes);
+        if xml.contains("<hp:connectLine")
+            || xml.contains("<connectLine")
+            || xml.contains("<hp:ole")
+            || xml.contains("<ole")
+        {
+            report.block(
+                HwpxIssueScope::Section(section_idx),
+                "hwpx-shape-unsupported",
+                format!(
+                    "Section {} contains preserved shape payloads that are not editable in HWPX yet.",
+                    section_idx
+                ),
+            );
+        }
     }
 }
 
@@ -582,6 +914,113 @@ fn analyze_paragraph(
     }
 }
 
+fn analyze_caption_paragraphs(
+    caption: Option<&Caption>,
+    section_idx: usize,
+    para_idx: usize,
+    report: &mut HwpxSupportReport,
+) {
+    if let Some(caption) = caption {
+        for para in &caption.paragraphs {
+            analyze_paragraph(para, section_idx, para_idx, report);
+        }
+    }
+}
+
+fn shape_issue_code(shape: &ShapeObject) -> Option<&'static str> {
+    match shape {
+        ShapeObject::Line(_)
+        | ShapeObject::Rectangle(_)
+        | ShapeObject::Ellipse(_)
+        | ShapeObject::Arc(_)
+        | ShapeObject::Polygon(_)
+        | ShapeObject::Picture(_) => None,
+        ShapeObject::Curve(_) => Some("hwpx-shape-curve"),
+        ShapeObject::Group(group) => {
+            if group.children.iter().all(|child| shape_issue_code(child).is_none()) {
+                None
+            } else {
+                Some("hwpx-shape-group-unsupported-child")
+            }
+        }
+    }
+}
+
+fn analyze_shape_object(
+    shape: &ShapeObject,
+    section_idx: usize,
+    para_idx: usize,
+    report: &mut HwpxSupportReport,
+) {
+    if let Some(code) = shape_issue_code(shape) {
+        let message = match code {
+            "hwpx-shape-curve" => format!(
+                "Paragraph {} in section {} uses curve shapes that are not written to HWPX yet.",
+                para_idx, section_idx
+            ),
+            _ => format!(
+                "Paragraph {} in section {} contains grouped shapes with unsupported child payloads.",
+                para_idx, section_idx
+            ),
+        };
+        report.block(HwpxIssueScope::Section(section_idx), code, message);
+        return;
+    }
+
+    match shape {
+        ShapeObject::Line(line) => {
+            analyze_caption_paragraphs(line.drawing.caption.as_ref(), section_idx, para_idx, report);
+            if let Some(text_box) = line.drawing.text_box.as_ref() {
+                for para in &text_box.paragraphs {
+                    analyze_paragraph(para, section_idx, para_idx, report);
+                }
+            }
+        }
+        ShapeObject::Rectangle(rect) => {
+            analyze_caption_paragraphs(rect.drawing.caption.as_ref(), section_idx, para_idx, report);
+            if let Some(text_box) = rect.drawing.text_box.as_ref() {
+                for para in &text_box.paragraphs {
+                    analyze_paragraph(para, section_idx, para_idx, report);
+                }
+            }
+        }
+        ShapeObject::Ellipse(ellipse) => {
+            analyze_caption_paragraphs(ellipse.drawing.caption.as_ref(), section_idx, para_idx, report);
+            if let Some(text_box) = ellipse.drawing.text_box.as_ref() {
+                for para in &text_box.paragraphs {
+                    analyze_paragraph(para, section_idx, para_idx, report);
+                }
+            }
+        }
+        ShapeObject::Arc(arc) => {
+            analyze_caption_paragraphs(arc.drawing.caption.as_ref(), section_idx, para_idx, report);
+            if let Some(text_box) = arc.drawing.text_box.as_ref() {
+                for para in &text_box.paragraphs {
+                    analyze_paragraph(para, section_idx, para_idx, report);
+                }
+            }
+        }
+        ShapeObject::Polygon(polygon) => {
+            analyze_caption_paragraphs(polygon.drawing.caption.as_ref(), section_idx, para_idx, report);
+            if let Some(text_box) = polygon.drawing.text_box.as_ref() {
+                for para in &text_box.paragraphs {
+                    analyze_paragraph(para, section_idx, para_idx, report);
+                }
+            }
+        }
+        ShapeObject::Curve(_) => {}
+        ShapeObject::Group(group) => {
+            analyze_caption_paragraphs(group.caption.as_ref(), section_idx, para_idx, report);
+            for child in &group.children {
+                analyze_shape_object(child, section_idx, para_idx, report);
+            }
+        }
+        ShapeObject::Picture(picture) => {
+            analyze_caption_paragraphs(picture.caption.as_ref(), section_idx, para_idx, report);
+        }
+    }
+}
+
 fn analyze_control(
     control: &Control,
     para: &Paragraph,
@@ -604,11 +1043,10 @@ fn analyze_control(
             }
         }
         Control::Picture(pic) => {
-            if pic.caption.is_some() {
-                report.block(HwpxIssueScope::Section(section_idx), "hwpx-picture-caption", format!(
-                    "Paragraph {} in section {} uses picture captions that are not written to HWPX yet.",
-                    para_idx, section_idx
-                ));
+            if let Some(caption) = pic.caption.as_ref() {
+                for para in &caption.paragraphs {
+                    analyze_paragraph(para, section_idx, para_idx, report);
+                }
             }
         }
         Control::Header(header) => {
@@ -656,10 +1094,7 @@ fn analyze_control(
             "Paragraph {} in section {} uses hidden comments that are not written to HWPX yet.",
             para_idx, section_idx
         )),
-        Control::Shape(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-shape", format!(
-            "Paragraph {} in section {} uses drawing shapes that are not written to HWPX yet.",
-            para_idx, section_idx
-        )),
+        Control::Shape(shape) => analyze_shape_object(shape, section_idx, para_idx, report),
         Control::Equation(_) => report.block(HwpxIssueScope::Section(section_idx), "hwpx-equation", format!(
             "Paragraph {} in section {} uses equations that are not written to HWPX yet.",
             para_idx, section_idx
@@ -1387,7 +1822,7 @@ fn serialize_section_xml(section: &Section) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(
-        r#"<hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section">"#,
+        r#"<hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core">"#,
     );
 
     if section.paragraphs.is_empty() {
@@ -1718,6 +2153,7 @@ fn serialize_control_xml(control: &Control) -> Result<String, SerializeError> {
         )),
         Control::Table(table) => serialize_table_xml(table),
         Control::Picture(picture) => serialize_picture_xml(picture),
+        Control::Shape(shape) => serialize_shape_xml(shape, false),
         Control::Header(header) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
             serialize_header_footer_control(
@@ -2019,33 +2455,35 @@ fn serialize_table_cell_xml(cell: &Cell) -> Result<String, SerializeError> {
 }
 
 fn serialize_picture_xml(picture: &Picture) -> Result<String, SerializeError> {
+    serialize_picture_xml_with_context(picture, false)
+}
+
+fn serialize_picture_xml_with_context(
+    picture: &Picture,
+    nested_in_group: bool,
+) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
         r#"<hp:pic zOrder="{}" textWrap="{}" instid="{}" groupLevel="{}">"#,
         picture.common.z_order,
         text_wrap_to_xml(picture.common.text_wrap),
-        picture.common.instance_id,
+        resolved_instance_id(&picture.common),
         picture.shape_attr.group_level,
     ));
-    xml.push_str(&format!(
-        r#"<hp:sz width="{}" height="{}"/>"#,
-        picture.common.width,
-        picture.common.height,
-    ));
-    xml.push_str(&serialize_pos_xml(&picture.common));
-    xml.push_str(&format!(
-        r#"<hp:outMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        picture.common.margin.left,
-        picture.common.margin.right,
-        picture.common.margin.top,
-        picture.common.margin.bottom,
-    ));
-    xml.push_str(&format!(
-        r#"<hp:inMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
-        picture.padding.left,
-        picture.padding.right,
-        picture.padding.top,
-        picture.padding.bottom,
+    xml.push_str(&serialize_size_xml(&picture.common));
+    if !nested_in_group {
+        xml.push_str(&serialize_pos_xml(&picture.common));
+    }
+    xml.push_str(&serialize_out_margin_xml(&picture.common));
+    if let Some(caption) = &picture.caption {
+        xml.push_str(&serialize_caption_xml(caption)?);
+    }
+    xml.push_str(&serialize_shape_component_xml(&picture.shape_attr, true));
+    xml.push_str(&serialize_line_shape_xml(
+        picture.border_attr.color,
+        picture.border_attr.width,
+        picture.border_attr.attr,
+        picture.border_attr.outline_style,
     ));
     xml.push_str(&format!(
         r#"<hp:imgClip left="{}" right="{}" top="{}" bottom="{}"/>"#,
@@ -2053,6 +2491,13 @@ fn serialize_picture_xml(picture: &Picture) -> Result<String, SerializeError> {
         picture.crop.right,
         picture.crop.top,
         picture.crop.bottom,
+    ));
+    xml.push_str(&format!(
+        r#"<hp:inMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
+        picture.padding.left,
+        picture.padding.right,
+        picture.padding.top,
+        picture.padding.bottom,
     ));
     xml.push_str(&format!(
         r#"<hp:img binaryItemIDRef="image{}" bright="{}" contrast="{}" effect="{}"/>"#,
@@ -2065,9 +2510,289 @@ fn serialize_picture_xml(picture: &Picture) -> Result<String, SerializeError> {
     Ok(xml)
 }
 
+fn serialize_shape_xml(shape: &ShapeObject, nested_in_group: bool) -> Result<String, SerializeError> {
+    match shape {
+        ShapeObject::Picture(picture) => serialize_picture_xml_with_context(picture, nested_in_group),
+        ShapeObject::Group(group) => {
+            let mut xml = String::new();
+            xml.push_str(&format!(
+                r#"<hp:container zOrder="{}" textWrap="{}" instid="{}" groupLevel="{}">"#,
+                group.common.z_order,
+                text_wrap_to_xml(group.common.text_wrap),
+                resolved_instance_id(&group.common),
+                group.shape_attr.group_level,
+            ));
+            xml.push_str(&serialize_size_xml(&group.common));
+            if !nested_in_group {
+                xml.push_str(&serialize_pos_xml(&group.common));
+            }
+            xml.push_str(&serialize_out_margin_xml(&group.common));
+            if let Some(caption) = &group.caption {
+                xml.push_str(&serialize_caption_xml(caption)?);
+            }
+            xml.push_str(&serialize_shape_component_xml(&group.shape_attr, false));
+            for child in &group.children {
+                xml.push_str(&serialize_shape_xml(child, true)?);
+            }
+            xml.push_str(r#"</hp:container>"#);
+            Ok(xml)
+        }
+        ShapeObject::Curve(_) => Err(SerializeError::CfbError(
+            "Curve shapes are not written to HWPX yet.".to_string(),
+        )),
+        ShapeObject::Line(line) => {
+            let mut xml = start_basic_shape_xml(
+                "line",
+                &line.common,
+                line.drawing.caption.as_ref(),
+                &line.drawing.shape_attr,
+                nested_in_group,
+            )?;
+            xml.push_str(&serialize_line_shape_xml(
+                line.drawing.border_line.color,
+                line.drawing.border_line.width,
+                line.drawing.border_line.attr,
+                line.drawing.border_line.outline_style,
+            ));
+            if let Some(fill_xml) = serialize_fill_brush_xml(&line.drawing.fill) {
+                xml.push_str(&fill_xml);
+            }
+            if let Some(text_box) = &line.drawing.text_box {
+                xml.push_str(&serialize_draw_text_xml(text_box)?);
+            }
+            xml.push_str(&serialize_shadow_xml(
+                line.drawing.shadow_type as u8,
+                line.drawing.shadow_color,
+                line.drawing.shadow_offset_x,
+                line.drawing.shadow_offset_y,
+                line.drawing.shadow_alpha,
+            ));
+            xml.push_str(&serialize_point_xml("startPt", line.start.x, line.start.y));
+            xml.push_str(&serialize_point_xml("endPt", line.end.x, line.end.y));
+            xml.push_str(r#"</hp:line>"#);
+            Ok(xml)
+        }
+        ShapeObject::Rectangle(rect) => {
+            let mut xml = start_basic_shape_xml_with_extra_attrs(
+                "rect",
+                &rect.common,
+                rect.drawing.caption.as_ref(),
+                &rect.drawing.shape_attr,
+                nested_in_group,
+                &format!(r#" ratio="{}""#, rect.round_rate),
+            )?;
+            xml.push_str(&serialize_line_shape_xml(
+                rect.drawing.border_line.color,
+                rect.drawing.border_line.width,
+                rect.drawing.border_line.attr,
+                rect.drawing.border_line.outline_style,
+            ));
+            if let Some(fill_xml) = serialize_fill_brush_xml(&rect.drawing.fill) {
+                xml.push_str(&fill_xml);
+            }
+            if let Some(text_box) = &rect.drawing.text_box {
+                xml.push_str(&serialize_draw_text_xml(text_box)?);
+            }
+            xml.push_str(&serialize_shadow_xml(
+                rect.drawing.shadow_type as u8,
+                rect.drawing.shadow_color,
+                rect.drawing.shadow_offset_x,
+                rect.drawing.shadow_offset_y,
+                rect.drawing.shadow_alpha,
+            ));
+            for index in 0..4 {
+                xml.push_str(&serialize_point_xml(
+                    &format!("pt{}", index),
+                    rect.x_coords[index],
+                    rect.y_coords[index],
+                ));
+            }
+            xml.push_str(r#"</hp:rect>"#);
+            Ok(xml)
+        }
+        ShapeObject::Ellipse(ellipse) => {
+            let mut extra_attrs = String::new();
+            if ellipse.attr & 0x1 != 0 {
+                extra_attrs.push_str(r#" intervalDirty="1""#);
+            }
+            if ellipse.attr & 0x2 != 0 {
+                extra_attrs.push_str(r#" hasArcPr="1""#);
+            }
+            let mut xml = start_basic_shape_xml_with_extra_attrs(
+                "ellipse",
+                &ellipse.common,
+                ellipse.drawing.caption.as_ref(),
+                &ellipse.drawing.shape_attr,
+                nested_in_group,
+                &extra_attrs,
+            )?;
+            xml.push_str(&serialize_line_shape_xml(
+                ellipse.drawing.border_line.color,
+                ellipse.drawing.border_line.width,
+                ellipse.drawing.border_line.attr,
+                ellipse.drawing.border_line.outline_style,
+            ));
+            if let Some(fill_xml) = serialize_fill_brush_xml(&ellipse.drawing.fill) {
+                xml.push_str(&fill_xml);
+            }
+            if let Some(text_box) = &ellipse.drawing.text_box {
+                xml.push_str(&serialize_draw_text_xml(text_box)?);
+            }
+            xml.push_str(&serialize_shadow_xml(
+                ellipse.drawing.shadow_type as u8,
+                ellipse.drawing.shadow_color,
+                ellipse.drawing.shadow_offset_x,
+                ellipse.drawing.shadow_offset_y,
+                ellipse.drawing.shadow_alpha,
+            ));
+            xml.push_str(&serialize_point_xml("center", ellipse.center.x, ellipse.center.y));
+            xml.push_str(&serialize_point_xml("ax1", ellipse.axis1.x, ellipse.axis1.y));
+            xml.push_str(&serialize_point_xml("ax2", ellipse.axis2.x, ellipse.axis2.y));
+            xml.push_str(&serialize_point_xml("start1", ellipse.start1.x, ellipse.start1.y));
+            xml.push_str(&serialize_point_xml("end1", ellipse.end1.x, ellipse.end1.y));
+            xml.push_str(&serialize_point_xml("start2", ellipse.start2.x, ellipse.start2.y));
+            xml.push_str(&serialize_point_xml("end2", ellipse.end2.x, ellipse.end2.y));
+            xml.push_str(r#"</hp:ellipse>"#);
+            Ok(xml)
+        }
+        ShapeObject::Arc(arc) => {
+            let mut xml = start_basic_shape_xml_with_extra_attrs(
+                "arc",
+                &arc.common,
+                arc.drawing.caption.as_ref(),
+                &arc.drawing.shape_attr,
+                nested_in_group,
+                &format!(r#" type="{}""#, arc_type_to_xml(arc.arc_type)),
+            )?;
+            xml.push_str(&serialize_line_shape_xml(
+                arc.drawing.border_line.color,
+                arc.drawing.border_line.width,
+                arc.drawing.border_line.attr,
+                arc.drawing.border_line.outline_style,
+            ));
+            if let Some(fill_xml) = serialize_fill_brush_xml(&arc.drawing.fill) {
+                xml.push_str(&fill_xml);
+            }
+            if let Some(text_box) = &arc.drawing.text_box {
+                xml.push_str(&serialize_draw_text_xml(text_box)?);
+            }
+            xml.push_str(&serialize_shadow_xml(
+                arc.drawing.shadow_type as u8,
+                arc.drawing.shadow_color,
+                arc.drawing.shadow_offset_x,
+                arc.drawing.shadow_offset_y,
+                arc.drawing.shadow_alpha,
+            ));
+            xml.push_str(&serialize_point_xml("center", arc.center.x, arc.center.y));
+            xml.push_str(&serialize_point_xml("ax1", arc.axis1.x, arc.axis1.y));
+            xml.push_str(&serialize_point_xml("ax2", arc.axis2.x, arc.axis2.y));
+            xml.push_str(r#"</hp:arc>"#);
+            Ok(xml)
+        }
+        ShapeObject::Polygon(polygon) => {
+            let mut xml = start_basic_shape_xml(
+                "polygon",
+                &polygon.common,
+                polygon.drawing.caption.as_ref(),
+                &polygon.drawing.shape_attr,
+                nested_in_group,
+            )?;
+            xml.push_str(&serialize_line_shape_xml(
+                polygon.drawing.border_line.color,
+                polygon.drawing.border_line.width,
+                polygon.drawing.border_line.attr,
+                polygon.drawing.border_line.outline_style,
+            ));
+            if let Some(fill_xml) = serialize_fill_brush_xml(&polygon.drawing.fill) {
+                xml.push_str(&fill_xml);
+            }
+            if let Some(text_box) = &polygon.drawing.text_box {
+                xml.push_str(&serialize_draw_text_xml(text_box)?);
+            }
+            xml.push_str(&serialize_shadow_xml(
+                polygon.drawing.shadow_type as u8,
+                polygon.drawing.shadow_color,
+                polygon.drawing.shadow_offset_x,
+                polygon.drawing.shadow_offset_y,
+                polygon.drawing.shadow_alpha,
+            ));
+            for point in &polygon.points {
+                xml.push_str(&serialize_point_xml("pt", point.x, point.y));
+            }
+            xml.push_str(r#"</hp:polygon>"#);
+            Ok(xml)
+        }
+    }
+}
+
+fn start_basic_shape_xml(
+    tag_name: &str,
+    common: &CommonObjAttr,
+    caption: Option<&Caption>,
+    shape_attr: &crate::model::shape::ShapeComponentAttr,
+    nested_in_group: bool,
+) -> Result<String, SerializeError> {
+    start_basic_shape_xml_with_extra_attrs(tag_name, common, caption, shape_attr, nested_in_group, "")
+}
+
+fn start_basic_shape_xml_with_extra_attrs(
+    tag_name: &str,
+    common: &CommonObjAttr,
+    caption: Option<&Caption>,
+    shape_attr: &crate::model::shape::ShapeComponentAttr,
+    nested_in_group: bool,
+    extra_attrs: &str,
+) -> Result<String, SerializeError> {
+    let mut xml = String::new();
+    xml.push_str(&format!(
+        r#"<hp:{} zOrder="{}" textWrap="{}" instid="{}" groupLevel="{}"{}>"#,
+        tag_name,
+        common.z_order,
+        text_wrap_to_xml(common.text_wrap),
+        resolved_instance_id(common),
+        shape_attr.group_level,
+        extra_attrs,
+    ));
+    xml.push_str(&serialize_size_xml(common));
+    if !nested_in_group {
+        xml.push_str(&serialize_pos_xml(common));
+    }
+    xml.push_str(&serialize_out_margin_xml(common));
+    if let Some(caption) = caption {
+        xml.push_str(&serialize_caption_xml(caption)?);
+    }
+    xml.push_str(&serialize_shape_component_xml(shape_attr, false));
+    Ok(xml)
+}
+
+fn resolved_instance_id(common: &CommonObjAttr) -> u32 {
+    if common.instance_id != 0 {
+        return common.instance_id;
+    }
+
+    let seed = common.ctrl_id
+        ^ common.width
+        ^ common.height
+        ^ (common.z_order as u32)
+        ^ common.vertical_offset
+        ^ common.horizontal_offset;
+    let id = (seed | 0x4000_0000).max(1);
+    if id == 0 { 0x4000_0001 } else { id }
+}
+
+fn serialize_size_xml(common: &CommonObjAttr) -> String {
+    format!(
+        r#"<hp:sz width="{}" widthRelTo="{}" height="{}" heightRelTo="{}" protect="0"/>"#,
+        common.width,
+        size_criterion_to_xml(common.width_criterion),
+        common.height,
+        size_criterion_to_xml(common.height_criterion),
+    )
+}
+
 fn serialize_pos_xml(common: &CommonObjAttr) -> String {
     format!(
-        r#"<hp:pos treatAsChar="{}" vertRelTo="{}" horzRelTo="{}" vertAlign="{}" horzAlign="{}" vertOffset="{}" horzOffset="{}"/>"#,
+        r#"<hp:pos treatAsChar="{}" affectLSpacing="0" flowWithText="0" allowOverlap="1" holdAnchorAndSO="0" vertRelTo="{}" horzRelTo="{}" vertAlign="{}" horzAlign="{}" vertOffset="{}" horzOffset="{}"/>"#,
         bool_to_attr(common.treat_as_char),
         vert_rel_to_xml(common.vert_rel_to),
         horz_rel_to_xml(common.horz_rel_to),
@@ -2075,6 +2800,173 @@ fn serialize_pos_xml(common: &CommonObjAttr) -> String {
         horz_align_to_xml(common.horz_align),
         common.vertical_offset,
         common.horizontal_offset,
+    )
+}
+
+fn serialize_out_margin_xml(common: &CommonObjAttr) -> String {
+    format!(
+        r#"<hp:outMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
+        common.margin.left,
+        common.margin.right,
+        common.margin.top,
+        common.margin.bottom,
+    )
+}
+
+fn serialize_shape_component_xml(
+    shape_attr: &crate::model::shape::ShapeComponentAttr,
+    rotate_image: bool,
+) -> String {
+    let mut xml = String::new();
+    xml.push_str(&format!(
+        r#"<hp:offset x="{}" y="{}"/>"#,
+        shape_attr.offset_x.max(0),
+        shape_attr.offset_y.max(0),
+    ));
+    xml.push_str(&format!(
+        r#"<hp:orgSz width="{}" height="{}"/>"#,
+        shape_attr.original_width,
+        shape_attr.original_height,
+    ));
+    xml.push_str(&format!(
+        r#"<hp:curSz width="{}" height="{}"/>"#,
+        shape_attr.current_width.max(shape_attr.original_width),
+        shape_attr.current_height.max(shape_attr.original_height),
+    ));
+    xml.push_str(&format!(
+        r#"<hp:flip horizontal="{}" vertical="{}"/>"#,
+        bool_to_attr(shape_attr.horz_flip),
+        bool_to_attr(shape_attr.vert_flip),
+    ));
+    xml.push_str(&format!(
+        r#"<hp:rotationInfo angle="{}" centerX="{}" centerY="{}" rotateimage="{}"/>"#,
+        shape_attr.rotation_angle,
+        shape_attr.rotation_center.x.max(0),
+        shape_attr.rotation_center.y.max(0),
+        bool_to_attr(rotate_image),
+    ));
+    xml.push_str(&serialize_rendering_info_xml(shape_attr));
+    xml
+}
+
+fn serialize_rendering_info_xml(shape_attr: &crate::model::shape::ShapeComponentAttr) -> String {
+    let a = if shape_attr.render_sx == 0.0 { 1.0 } else { shape_attr.render_sx };
+    let d = if shape_attr.render_sy == 0.0 { 1.0 } else { shape_attr.render_sy };
+    format!(
+        r#"<hp:renderingInfo><hc:transMatrix e1="{}" e2="{}" e3="{}" e4="{}" e5="{}" e6="{}"/></hp:renderingInfo>"#,
+        format_matrix_value(a),
+        format_matrix_value(shape_attr.render_b),
+        format_matrix_value(shape_attr.render_tx),
+        format_matrix_value(shape_attr.render_c),
+        format_matrix_value(d),
+        format_matrix_value(shape_attr.render_ty),
+    )
+}
+
+fn format_matrix_value(value: f64) -> String {
+    if (value.fract()).abs() < f64::EPSILON {
+        format!("{}", value as i64)
+    } else {
+        let mut text = format!("{value:.6}");
+        while text.contains('.') && text.ends_with('0') {
+            text.pop();
+        }
+        if text.ends_with('.') {
+            text.pop();
+        }
+        text
+    }
+}
+
+fn serialize_point_xml(tag_name: &str, x: i32, y: i32) -> String {
+    format!(r#"<hc:{} x="{}" y="{}"/>"#, tag_name, x, y)
+}
+
+fn serialize_line_shape_xml(color: u32, width: i32, attr: u32, outline_style: u8) -> String {
+    format!(
+        r#"<hp:lineShape color="{}" width="{}" style="{}" endCap="FLAT" headStyle="NORMAL" tailStyle="NORMAL" headfill="1" tailfill="1" headSz="MEDIUM_MEDIUM" tailSz="MEDIUM_MEDIUM" outlineStyle="{}" alpha="0"/>"#,
+        color_to_hex(color),
+        width.max(0),
+        line_shape_to_xml((attr & 0xFF) as u8),
+        outline_style_to_xml(outline_style),
+    )
+}
+
+fn serialize_fill_brush_xml(fill: &crate::model::style::Fill) -> Option<String> {
+    match fill.fill_type {
+        FillType::None => None,
+        FillType::Solid => {
+            let solid = fill.solid.as_ref()?;
+            Some(format!(
+                r#"<hc:fillBrush><hc:winBrush faceColor="{}" hatchColor="{}" alpha="{}"/></hc:fillBrush>"#,
+                color_to_hex(solid.background_color),
+                color_to_hex(solid.pattern_color),
+                format_matrix_value(f64::from(fill.alpha) / 255.0),
+            ))
+        }
+        FillType::Gradient => {
+            let gradient = fill.gradient.as_ref()?;
+            Some(format!(
+                r#"<hc:fillBrush><hc:gradation type="{}" angle="{}" centerX="{}" centerY="{}"/></hc:fillBrush>"#,
+                gradient.gradient_type,
+                gradient.angle,
+                gradient.center_x,
+                gradient.center_y,
+            ))
+        }
+        FillType::Image => {
+            let image = fill.image.as_ref()?;
+            Some(format!(
+                r#"<hc:fillBrush><hc:imgBrush mode="{}"/></hc:fillBrush>"#,
+                image_fill_mode_to_xml(image.fill_mode),
+            ))
+        }
+    }
+}
+
+fn serialize_draw_text_xml(text_box: &crate::model::shape::TextBox) -> Result<String, SerializeError> {
+    let mut xml = String::new();
+    xml.push_str(&format!(
+        r#"<hp:drawText lastWidth="{}" name="" editable="0">"#,
+        text_box.max_width
+    ));
+    xml.push_str(&format!(
+        r#"<hp:subList vertAlign="{}">"#,
+        vertical_align_to_xml(text_box.vertical_align),
+    ));
+    if text_box.paragraphs.is_empty() {
+        xml.push_str(&serialize_paragraph_xml(&Paragraph::new_empty(), None, None)?);
+    } else {
+        for para in &text_box.paragraphs {
+            xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+        }
+    }
+    xml.push_str(r#"</hp:subList>"#);
+    xml.push_str(&format!(
+        r#"<hp:textMargin left="{}" right="{}" top="{}" bottom="{}"/>"#,
+        text_box.margin_left,
+        text_box.margin_right,
+        text_box.margin_top,
+        text_box.margin_bottom,
+    ));
+    xml.push_str(r#"</hp:drawText>"#);
+    Ok(xml)
+}
+
+fn serialize_shadow_xml(
+    shadow_type: u8,
+    shadow_color: u32,
+    shadow_offset_x: i32,
+    shadow_offset_y: i32,
+    shadow_alpha: u8,
+) -> String {
+    format!(
+        r#"<hp:shadow type="{}" color="{}" offsetX="{}" offsetY="{}" alpha="{}"/>"#,
+        shadow_type_to_xml(shadow_type),
+        color_to_hex(shadow_color),
+        shadow_offset_x,
+        shadow_offset_y,
+        shadow_alpha,
     )
 }
 
@@ -2088,9 +2980,18 @@ fn serialize_caption_xml(caption: &Caption) -> Result<String, SerializeError> {
         caption.max_width,
         bool_to_attr(caption.include_margin),
     ));
-    for para in &caption.paragraphs {
-        xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+    xml.push_str(&format!(
+        r#"<hp:subList vertAlign="{}">"#,
+        caption_vert_align_to_xml(caption.vert_align),
+    ));
+    if caption.paragraphs.is_empty() {
+        xml.push_str(&serialize_paragraph_xml(&Paragraph::new_empty(), None, None)?);
+    } else {
+        for para in &caption.paragraphs {
+            xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+        }
     }
+    xml.push_str(r#"</hp:subList>"#);
     xml.push_str(r#"</hp:caption>"#);
     Ok(xml)
 }
@@ -2404,6 +3305,16 @@ fn text_wrap_to_xml(text_wrap: TextWrap) -> &'static str {
     }
 }
 
+fn size_criterion_to_xml(size_criterion: crate::model::shape::SizeCriterion) -> &'static str {
+    match size_criterion {
+        crate::model::shape::SizeCriterion::Paper => "PAPER",
+        crate::model::shape::SizeCriterion::Page => "PAGE",
+        crate::model::shape::SizeCriterion::Column => "COLUMN",
+        crate::model::shape::SizeCriterion::Para => "PARA",
+        crate::model::shape::SizeCriterion::Absolute => "ABSOLUTE",
+    }
+}
+
 fn vert_rel_to_xml(vert_rel_to: VertRelTo) -> &'static str {
     match vert_rel_to {
         VertRelTo::Paper => "PAPER",
@@ -2487,12 +3398,36 @@ fn image_fill_mode_to_xml(mode: ImageFillMode) -> &'static str {
     }
 }
 
+fn outline_style_to_xml(outline_style: u8) -> &'static str {
+    match outline_style {
+        1 => "OUTER",
+        2 => "INNER",
+        _ => "NORMAL",
+    }
+}
+
 fn caption_direction_to_xml(direction: CaptionDirection) -> &'static str {
     match direction {
         CaptionDirection::Left => "LEFT",
         CaptionDirection::Right => "RIGHT",
         CaptionDirection::Top => "TOP",
         CaptionDirection::Bottom => "BOTTOM",
+    }
+}
+
+fn caption_vert_align_to_xml(align: CaptionVertAlign) -> &'static str {
+    match align {
+        CaptionVertAlign::Top => "TOP",
+        CaptionVertAlign::Center => "CENTER",
+        CaptionVertAlign::Bottom => "BOTTOM",
+    }
+}
+
+fn arc_type_to_xml(arc_type: u8) -> &'static str {
+    match arc_type {
+        1 => "PIE",
+        2 => "CHORD",
+        _ => "NORMAL",
     }
 }
 

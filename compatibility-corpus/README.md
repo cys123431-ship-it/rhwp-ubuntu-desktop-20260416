@@ -51,3 +51,15 @@ Generate a structured report for one document:
 ```powershell
 cargo run --bin rhwp -- compat-report compatibility-corpus/fixtures/phase1-basic-text.hwpx
 ```
+
+Generate JSON diagnostics for CI/snapshot tooling:
+
+```powershell
+cargo run --bin rhwp -- compat-report --json compatibility-corpus/fixtures/basic-shape.hwpx
+```
+
+Emit per-entry JSON reports while validating a manifest:
+
+```powershell
+cargo run --bin rhwp -- compat-corpus --json --emit-reports compatibility-reports/phase2 compatibility-corpus/phase2-extended.tsv
+```

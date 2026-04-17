@@ -38,6 +38,12 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
@@ -52,6 +58,14 @@ jobs:
 
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
+
+      - name: Run Wave 2 Rust regression suite
+        run: |
+          cargo nextest run --profile ci --lib serializer::hwpx_writer::tests_clean
+          INSTA_UPDATE=no cargo nextest run --profile ci --lib compatibility_report_snapshot
+
+      - name: Run cargo-deny
+        run: cargo deny check advisories bans licenses sources
 
       - name: Build WASM package
         run: wasm-pack build --target web --out-dir pkg
@@ -72,37 +86,47 @@ jobs:
         run: cargo run --quiet --bin rhwp -- compat-corpus compatibility-corpus/phase1-protected.tsv
 
       - name: Validate phase2 extended corpus
-        run: cargo run --quiet --bin rhwp -- compat-corpus compatibility-corpus/phase2-extended.tsv
-
-      - name: Generate phase2 compatibility reports
         run: |
           mkdir -p compatibility-reports/phase2-extended
-          python3 - <<'PY'
-          import csv
-          import pathlib
-          import subprocess
+          cargo run --quiet --bin rhwp -- compat-corpus --json --emit-reports compatibility-reports/phase2-extended compatibility-corpus/phase2-extended.tsv > compatibility-reports/phase2-summary.json
 
-          root = pathlib.Path.cwd()
-          manifest = root / "compatibility-corpus" / "phase2-extended.tsv"
-          out_dir = root / "compatibility-reports" / "phase2-extended"
-          binary = root / "target" / "debug" / "rhwp"
+      - name: Publish compatibility summary
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
 
-          with manifest.open("r", encoding="utf-8") as fh:
-              reader = csv.reader(fh, delimiter="\t")
-              for row in reader:
-                  if not row or not row[0].strip() or row[0].lstrip().startswith("#"):
-                      continue
-                  source = (manifest.parent / row[0].strip()).resolve()
-                  safe_name = row[0].strip().replace("../", "").replace("/", "__").replace("\\", "__")
-                  report_path = out_dir / f"{safe_name}.txt"
-                  with report_path.open("w", encoding="utf-8") as out:
-                      subprocess.run(
-                          [str(binary), "compat-report", str(source)],
-                          cwd=root,
-                          check=True,
-                          text=True,
-                          stdout=out,
-                      )
+          summary = json.loads(Path("compatibility-reports/phase2-summary.json").read_text(encoding="utf-8"))
+          entries = summary["entries"]
+          protected = [entry for entry in entries if entry.get("editMode") == "protected-view"]
+          warnings = [entry for entry in entries if "hwpx-shape-unsupported" in entry.get("issueCodes", [])]
+          wave2 = [
+              entry for entry in entries
+              if entry["path"] in {
+                  "../samples/tac-img-02.hwpx",
+                  "fixtures/basic-shape.hwpx",
+                  "fixtures/textbox-in-shape.hwpx",
+                  "fixtures/picture-caption.hwpx",
+                  "fixtures/shape-group.hwpx",
+              }
+          ]
+
+          print("## Wave 2 Compatibility Summary")
+          print()
+          print(f"- Manifest: `{summary['manifest']}`")
+          print(f"- Total entries: `{summary['totalEntries']}`")
+          print(f"- Failures: `{summary['failures']}`")
+          print(f"- Protected-view entries: `{len(protected)}`")
+          print(f"- Preserve-only warning entries: `{len(warnings)}`")
+          print()
+          print("### Wave 2 promoted documents")
+          for entry in wave2:
+              print(f"- `{entry['path']}` -> `{entry.get('editMode', 'unknown')}`")
+          if protected:
+              print()
+              print("### Remaining protected-view blockers")
+              for entry in protected:
+                  print(f"- `{entry['path']}` -> {', '.join(entry.get('issueCodes', []))}")
           PY
 
       - name: Build Ubuntu package
@@ -123,16 +147,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rhwp-compatibility-reports
-          path: compatibility-reports/phase2-extended/*
+          path: compatibility-reports/**
           if-no-files-found: error
           retention-days: 30
 
   install-smoke-test:
     name: Install Smoke Test
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.ubuntu-version }}
     needs: build-deb
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu-version: [ubuntu-22.04, ubuntu-24.04]
 
     steps:
       - uses: actions/checkout@v5

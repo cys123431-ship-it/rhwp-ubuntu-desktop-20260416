@@ -1,0 +1,38 @@
+[package]
+name = "rhwp-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.rhwp]
+path = ".."
+
+[[bin]]
+name = "parse_hwpx_package"
+path = "fuzz_targets/parse_hwpx_package.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "serialize_hwpx_dirty_section"
+path = "fuzz_targets/serialize_hwpx_dirty_section.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "compat_report_hwpx"
+path = "fuzz_targets/compat_report_hwpx.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

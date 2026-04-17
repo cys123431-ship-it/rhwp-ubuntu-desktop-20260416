@@ -281,7 +281,9 @@ impl LayoutEngine {
 
     /// 레이아웃 경계 초과 기록
     fn record_overflow(&self, overflow: LayoutOverflow) {
-        eprintln!("{}", overflow);
+        if std::env::var("LAYOUT_OVERFLOW_LOG").is_ok() {
+            eprintln!("{}", overflow);
+        }
         self.layout_overflows.borrow_mut().push(overflow);
     }
 
