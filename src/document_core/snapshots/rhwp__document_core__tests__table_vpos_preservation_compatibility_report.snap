@@ -11,6 +11,16 @@ expression: report
       "severity": "warning"
     },
     {
+      "code": "hwpx-section-page-border-fill",
+      "message": "Section 0 uses page border/fill settings that are not written to HWPX yet.",
+      "severity": "warning"
+    },
+    {
+      "code": "hwpx-section-extra-records",
+      "message": "Section 0 carries extra section records that are not preserved in HWPX yet.",
+      "severity": "warning"
+    },
+    {
       "code": "hwpx-field-missing-range",
       "message": "Paragraph 4 in section 0 has a field control without a tracked text range.",
       "severity": "warning"

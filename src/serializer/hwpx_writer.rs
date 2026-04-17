@@ -722,22 +722,29 @@ mod tests_clean {
     }
 
     #[test]
-    fn test_form_002_sample_roundtrip_becomes_supported() {
+    fn test_form_002_sample_roundtrip_stays_editable_safe() {
         let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("rhwp-studio/public/samples/form-002.hwpx");
         let bytes = std::fs::read(sample).expect("read form-002.hwpx");
-        let document = crate::parser::parse_document(&bytes).expect("parse form-002.hwpx");
-
-        let report = analyze_hwpx_support(&document);
-        assert!(report.is_supported(), "{:?}", report.blockers);
-
-        let saved = serialize_hwpx(&document).expect("serialize form-002.hwpx");
-        let reparsed = crate::parser::parse_document(&saved).expect("reparse form-002.hwpx");
-        let reparsed_report = analyze_hwpx_support(&reparsed);
-        assert!(
-            reparsed_report.is_supported(),
+        let core = crate::document_core::DocumentCore::from_bytes(&bytes)
+            .expect("parse form-002.hwpx");
+        let report = core.compatibility_report_data();
+        assert_eq!(
+            report.edit_mode,
+            crate::document_core::DocumentEditMode::EditableSafe,
             "{:?}",
-            reparsed_report.blockers
+            report.issues
+        );
+
+        let saved = core.export_hwpx_native().expect("serialize form-002.hwpx");
+        let reparsed_core = crate::document_core::DocumentCore::from_bytes(&saved)
+            .expect("reparse form-002.hwpx");
+        let reparsed_report = reparsed_core.compatibility_report_data();
+        assert_eq!(
+            reparsed_report.edit_mode,
+            crate::document_core::DocumentEditMode::EditableSafe,
+            "{:?}",
+            reparsed_report.issues
         );
     }
 
