@@ -2,6 +2,12 @@
 name = "rhwp-desktop"
 version = "0.1.0"
 edition = "2021"
+autobins = false
+default-run = "rhwp"
+
+[[bin]]
+name = "rhwp"
+path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
