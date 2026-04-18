@@ -1,17 +1,19 @@
 # rhwp-desktop
 
-Ubuntu desktop wrapper for `rhwp-studio`.
+Desktop wrapper for `rhwp-studio` on Ubuntu and Windows.
 
-## Phase 1 scope
+## Desktop scope
 
-- Package `rhwp-studio` as a Tauri desktop app for Ubuntu `22.04/24.04 LTS x86_64`.
+- Package `rhwp-studio` as a Tauri desktop app for Ubuntu `22.04/24.04 LTS x86_64` and Windows `10/11 x64`.
 - Open `.hwp` and `.hwpx` through native file dialogs, startup file arguments, and desktop file associations.
 - Keep the original extension on `Save`; allow format conversion on `Save As`.
-- Show a first-run banner when `rhwp` is not yet the default app for `application/x-hwp` and `application/x-hwpx`.
+- Show a first-run banner when `rhwp` is not yet the default app for HWP/HWPX documents.
 - Persist recent documents and automatic recovery snapshots in the app data directory.
 - Block risky documents with `protected-view` instead of attempting lossy saves.
 
-## Ubuntu install and first-run flow
+## Install and first-run flow
+
+### Ubuntu
 
 1. Install the generated `.deb`.
 2. Launch `rhwp`.
@@ -19,6 +21,16 @@ Ubuntu desktop wrapper for `rhwp-studio`.
 4. After that, `.hwp` and `.hwpx` files can be opened by double-click in Nautilus.
 
 The app uses `xdg-mime default rhwp.desktop application/x-hwp application/x-hwpx` for user-level default-app registration.
+
+### Windows
+
+1. Install the generated NSIS `.exe` or MSI package.
+2. Launch `rhwp`.
+3. If the session banner offers `Open Default Apps Settings`, open it once.
+4. In Windows Settings, choose `rhwp` as the default app for `.hwp` and `.hwpx`.
+5. After that, `.hwp` and `.hwpx` files can be opened by double-click in Explorer.
+
+Windows default-app selection requires explicit user confirmation, so `rhwp` opens Settings instead of changing defaults silently.
 
 ## Recovery and save policy
 
@@ -43,36 +55,46 @@ Ubuntu packaging assets live under [packaging/linux](./packaging/linux).
 2. Run `npm run build:linux` inside `rhwp-desktop`.
 3. Pick up the generated `.deb` from `src-tauri/target/release/bundle/deb/`.
 
+## Windows package build
+
+1. On Windows, install the Rust stable toolchain, Node.js, and Visual Studio Build Tools with the MSVC/Windows SDK components.
+2. Run `npm run build:windows` inside `rhwp-desktop`.
+3. Pick up the generated installers from `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/`.
+4. Tag builds can sign the installers when `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD` are configured in GitHub Actions.
+
 ## CI and releases
 
 - `.github/workflows/rhwp-desktop-linux.yml` builds the Ubuntu `.deb` on `ubuntu-22.04`.
+- `.github/workflows/rhwp-desktop-windows.yml` builds the Windows NSIS `.exe` and MSI installers on `windows-latest`.
 - The same workflow regenerates synthetic phase-1-safe HWPX fixtures, validates the `phase1-supported` / `phase1-protected` / `phase2-extended` corpus manifests, and uploads per-document `compat-report` artifacts for the phase-2 set before packaging.
-- The same workflow installs the package on `ubuntu-22.04` and `ubuntu-24.04`, validates the desktop and MIME assets, and runs installed-package WebDriver E2E under `xvfb`.
-- Tag pushes matching `v*` upload the `.deb` artifact to the GitHub release automatically.
+- The Linux workflow installs the package on `ubuntu-22.04` and `ubuntu-24.04`, validates the desktop and MIME assets, and runs installed-package WebDriver E2E under `xvfb`.
+- The Windows workflow runs NSIS/MSI install smoke tests, validates file-handler registration, and runs installed-package desktop E2E.
+- Tag pushes matching `v*` upload both the `.deb` artifact and the Windows installers to the GitHub release automatically.
 
 Corpus manifests live under [`compatibility-corpus/`](../compatibility-corpus/README.md).
 
 ## Wave 2 desktop E2E
 
-The installed-package E2E suite lives under [`e2e/`](./e2e/) and exercises the packaged Ubuntu app through `tauri-driver` + `selenium-webdriver`.
+The installed-package E2E suite lives under [`e2e/`](./e2e/) and exercises the packaged desktop app through `tauri-driver` + `selenium-webdriver`.
 
-The automated Wave 2 flow verifies:
+The automated desktop flow verifies:
 
-- the first-run `Set as default app` banner
+- the first-run default-app banner on Linux and Windows
 - startup open of the representative Wave 2 HWPX sample
 - recovery snapshot restore and cleanup after save
 - one-window-per-file startup fan-out for multiple input documents
+- single-instance handoff when a second launch opens another document
 
-Run it locally on Ubuntu after installing the package and `tauri-driver`:
+Run it locally after installing the package and `tauri-driver`:
 
-1. Install `webkit2gtk-driver`.
-2. Export `RHWP_E2E_APP=/usr/bin/rhwp` if needed.
+1. Install any platform-specific WebDriver prerequisites.
+2. Export `RHWP_E2E_APP` if needed.
 3. Run `npm ci` in `rhwp-desktop`.
 4. Run `npm run e2e:installed`.
 
 ## Compatibility roadmap
 
-Phase 1 focuses on Ubuntu installation, desktop integration, safe editing, and original-format save behavior.
+Phase 1 focuses on desktop installation, file association registration, safe editing, and original-format save behavior.
 
 Hancom-grade compatibility work continues in later phases:
 

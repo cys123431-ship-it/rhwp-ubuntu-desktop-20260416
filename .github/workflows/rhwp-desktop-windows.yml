@@ -1,0 +1,325 @@
+name: Windows Desktop Package
+
+on:
+  push:
+    branches: [main, devel]
+    tags: ['v*']
+  pull_request:
+    branches: [main, devel]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows:
+    name: Build Windows installers
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install cargo-nextest
+        run: cargo install cargo-nextest --locked
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            rhwp-studio/package-lock.json
+            rhwp-desktop/package-lock.json
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run compatibility Rust regression suite
+        run: |
+          cargo nextest run --profile ci --lib serializer::hwpx_writer::tests_clean
+          $env:INSTA_UPDATE = "no"
+          cargo nextest run --profile ci --lib compatibility_report_snapshot
+          cargo nextest run --profile ci --lib hyperlink
+          cargo nextest run --profile ci --lib field_overlap
+          cargo nextest run --profile ci --lib wave5_metadata
+          cargo nextest run --profile ci --lib unknown_control
+
+      - name: Build WASM package
+        run: wasm-pack build --target web --out-dir pkg
+
+      - name: Build studio frontend
+        working-directory: rhwp-studio
+        run: |
+          npm ci
+          npm run build
+
+      - name: Generate synthetic phase1 HWPX fixtures
+        run: cargo run --quiet --bin rhwp -- compat-generate-fixtures compatibility-corpus/fixtures
+
+      - name: Validate phase1 supported corpus
+        run: cargo run --quiet --bin rhwp -- compat-corpus compatibility-corpus/phase1-supported.tsv
+
+      - name: Validate phase1 protected corpus
+        run: |
+          New-Item -ItemType Directory -Force compatibility-reports/phase1-protected | Out-Null
+          cargo run --quiet --bin rhwp -- compat-corpus --json --emit-reports compatibility-reports/phase1-protected compatibility-corpus/phase1-protected.tsv > compatibility-reports/phase1-protected-summary.json
+
+      - name: Validate phase2 extended corpus
+        run: |
+          New-Item -ItemType Directory -Force compatibility-reports/phase2-extended | Out-Null
+          cargo run --quiet --bin rhwp -- compat-corpus --json --emit-reports compatibility-reports/phase2-extended compatibility-corpus/phase2-extended.tsv > compatibility-reports/phase2-summary.json
+
+      - name: Ensure signing secrets for release tags
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD must be configured for release builds."
+          }
+
+      - name: Prepare Windows signing certificate
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            Write-Host 'Skipping Windows signing certificate preparation because secrets are not configured.'
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP 'rhwp-signing.pfx'
+          [System.IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          "WINDOWS_CERTIFICATE_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "WINDOWS_CERTIFICATE_PASSWORD=$env:WINDOWS_CERTIFICATE_PASSWORD" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Windows installers
+        working-directory: rhwp-desktop
+        run: |
+          npm ci
+          npm run build:windows
+
+      - name: Generate installer checksums
+        run: |
+          $bundleRoot = Join-Path $PWD 'rhwp-desktop\src-tauri\target\x86_64-pc-windows-msvc\release\bundle'
+          $installers = Get-ChildItem $bundleRoot -Recurse -Include *.exe,*.msi | Where-Object { -not $_.PSIsContainer }
+          if (-not $installers) {
+            throw "No Windows installers were generated."
+          }
+          foreach ($installer in $installers) {
+            $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+            Set-Content -Path "$($installer.FullName).sha256" -NoNewline -Value "$hash *$($installer.Name)"
+          }
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhwp-windows-installers
+          path: |
+            rhwp-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            rhwp-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256
+            rhwp-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            rhwp-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  smoke-nsis:
+    name: NSIS Smoke Test
+    runs-on: windows-latest
+    needs: build-windows
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: rhwp-desktop/package-lock.json
+
+      - name: Download Windows installers
+        uses: actions/download-artifact@v4
+        with:
+          name: rhwp-windows-installers
+          path: dist
+
+      - name: Install NSIS package
+        run: |
+          $installer = Get-ChildItem dist -Recurse -Filter *.exe | Where-Object { $_.Name -match 'setup|installer' } | Select-Object -First 1
+          if (-not $installer) {
+            $installer = Get-ChildItem dist -Recurse -Filter *.exe | Select-Object -First 1
+          }
+          if (-not $installer) {
+            throw "NSIS installer was not found."
+          }
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "NSIS installer failed with exit code $($process.ExitCode)"
+          }
+
+      - name: Verify installed executable and file handlers
+        run: |
+          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
+          if (-not (Test-Path $appPath)) {
+            throw "Installed executable not found: $appPath"
+          }
+
+          $candidateKeys = @(
+            'Registry::HKEY_CLASSES_ROOT\Applications\rhwp.exe\SupportedTypes',
+            'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Applications\rhwp.exe\SupportedTypes'
+          )
+          $supportedTypesKey = $candidateKeys | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $supportedTypesKey) {
+            throw "SupportedTypes registry key for rhwp.exe was not found."
+          }
+
+          $supportedTypes = (Get-ItemProperty $supportedTypesKey).PSObject.Properties.Name
+          if ($supportedTypes -notcontains '.hwp' -or $supportedTypes -notcontains '.hwpx') {
+            throw "Expected .hwp and .hwpx associations were not registered."
+          }
+
+      - name: Verify startup open by command line
+        run: |
+          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
+          $sample = Join-Path $PWD 'samples\task-001.hwp'
+          $process = Start-Process -FilePath $appPath -ArgumentList ('"' + $sample + '"') -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "Installed app exited before the smoke timeout."
+          }
+          Stop-Process -Id $process.Id -Force
+
+      - name: Install WebDriver test dependencies
+        working-directory: rhwp-desktop
+        run: npm ci
+
+      - name: Run installed-package desktop E2E
+        working-directory: rhwp-desktop
+        env:
+          RHWP_E2E_APP: C:\Program Files\rhwp\rhwp.exe
+        run: npm run e2e:installed
+
+  smoke-msi:
+    name: MSI Smoke Test
+    runs-on: windows-latest
+    needs: build-windows
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: rhwp-desktop/package-lock.json
+
+      - name: Download Windows installers
+        uses: actions/download-artifact@v4
+        with:
+          name: rhwp-windows-installers
+          path: dist
+
+      - name: Install MSI package
+        run: |
+          $installer = Get-ChildItem dist -Recurse -Filter *.msi | Select-Object -First 1
+          if (-not $installer) {
+            throw "MSI installer was not found."
+          }
+          $process = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', $installer.FullName, '/qn', 'ALLUSERS=1') -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "MSI installer failed with exit code $($process.ExitCode)"
+          }
+
+      - name: Verify installed executable and file handlers
+        run: |
+          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
+          if (-not (Test-Path $appPath)) {
+            throw "Installed executable not found: $appPath"
+          }
+
+          $candidateKeys = @(
+            'Registry::HKEY_CLASSES_ROOT\Applications\rhwp.exe\SupportedTypes',
+            'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Applications\rhwp.exe\SupportedTypes'
+          )
+          $supportedTypesKey = $candidateKeys | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $supportedTypesKey) {
+            throw "SupportedTypes registry key for rhwp.exe was not found."
+          }
+
+          $supportedTypes = (Get-ItemProperty $supportedTypesKey).PSObject.Properties.Name
+          if ($supportedTypes -notcontains '.hwp' -or $supportedTypes -notcontains '.hwpx') {
+            throw "Expected .hwp and .hwpx associations were not registered."
+          }
+
+      - name: Verify startup open by command line
+        run: |
+          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
+          $sample = Join-Path $PWD 'samples\tac-img-02.hwpx'
+          $process = Start-Process -FilePath $appPath -ArgumentList ('"' + $sample + '"') -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            throw "Installed app exited before the smoke timeout."
+          }
+          Stop-Process -Id $process.Id -Force
+
+      - name: Install WebDriver test dependencies
+        working-directory: rhwp-desktop
+        run: npm ci
+
+      - name: Run installed-package desktop E2E
+        working-directory: rhwp-desktop
+        env:
+          RHWP_E2E_APP: C:\Program Files\rhwp\rhwp.exe
+        run: npm run e2e:installed
+
+  publish-release:
+    name: Upload Windows installers to Release
+    runs-on: windows-latest
+    needs: [build-windows, smoke-nsis, smoke-msi]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows installers
+        uses: actions/download-artifact@v4
+        with:
+          name: rhwp-windows-installers
+          path: dist
+
+      - name: Attach Windows installers to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/**/*.exe
+            dist/**/*.exe.sha256
+            dist/**/*.msi
+            dist/**/*.msi.sha256
