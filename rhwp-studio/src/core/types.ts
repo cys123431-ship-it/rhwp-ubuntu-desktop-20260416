@@ -45,6 +45,8 @@ export interface FileAssociationStatus {
   supported: boolean;
   isDefault: boolean;
   message: string;
+  platform: 'linux' | 'windows' | 'unsupported';
+  actionMode: 'set-default' | 'open-settings' | 'none';
   defaultAppHwp?: string;
   defaultAppHwpx?: string;
   pendingMimeTypes: string[];

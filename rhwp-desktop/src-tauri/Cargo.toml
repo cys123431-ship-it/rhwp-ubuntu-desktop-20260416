@@ -18,3 +18,7 @@ serde_json = "1"
 tauri = { version = "2", features = [] }
 rfd = "0.15"
 chrono = { version = "0.4", features = ["clock"] }
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"

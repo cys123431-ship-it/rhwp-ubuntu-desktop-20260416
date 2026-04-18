@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -7,6 +8,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
     AppHandle, Emitter, Manager, Runtime, State, Webview, WebviewUrl, WebviewWindowBuilder,
 };
+
+#[cfg(target_os = "windows")]
+use winreg::{
+    enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER},
+    RegKey,
+};
+
+const HWP_MIME: &str = "application/x-hwp";
+const HWPX_MIME: &str = "application/x-hwpx";
 
 #[derive(Default)]
 struct StartupFiles {
@@ -56,6 +66,8 @@ struct FileAssociationStatus {
     supported: bool,
     is_default: bool,
     message: String,
+    platform: String,
+    action_mode: String,
     default_app_hwp: Option<String>,
     default_app_hwpx: Option<String>,
     pending_mime_types: Vec<String>,
@@ -195,20 +207,6 @@ fn open_path(path: &Path) -> Result<OpenDocumentResult, String> {
     })
 }
 
-fn collect_startup_files() -> Vec<OpenDocumentResult> {
-    std::env::args_os()
-        .skip(1)
-        .filter_map(|arg| {
-            let path = PathBuf::from(arg);
-            let ext = path.extension()?.to_string_lossy().to_ascii_lowercase();
-            if ext != "hwp" && ext != "hwpx" {
-                return None;
-            }
-            open_path(&path).ok()
-        })
-        .collect()
-}
-
 fn next_snapshot_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -222,21 +220,153 @@ fn load_recovery_snapshot_meta(path: &Path) -> Result<RecoverySnapshotMeta, Stri
     serde_json::from_str(&content).map_err(|err| err.to_string())
 }
 
+fn path_has_supported_document_extension(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "hwp" | "hwpx"
+    )
+}
+
+fn resolve_document_path(arg: &OsStr, cwd: Option<&Path>) -> Option<PathBuf> {
+    let raw = PathBuf::from(arg);
+    let candidate = if raw.is_absolute() {
+        raw
+    } else if let Some(base) = cwd {
+        base.join(raw)
+    } else {
+        raw
+    };
+
+    if !path_has_supported_document_extension(&candidate) {
+        return None;
+    }
+
+    Some(candidate)
+}
+
+fn collect_startup_files_from_args<I, S>(args: I, cwd: Option<&Path>) -> Vec<OpenDocumentResult>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    args.into_iter()
+        .filter_map(|arg| {
+            let path = resolve_document_path(arg.as_ref(), cwd)?;
+            open_path(&path).ok()
+        })
+        .collect()
+}
+
+fn collect_startup_files() -> Vec<OpenDocumentResult> {
+    collect_startup_files_from_args(std::env::args_os().skip(1), None)
+}
+
+fn next_document_window_label(
+    app: &AppHandle,
+    pending: &HashMap<String, Vec<OpenDocumentResult>>,
+) -> String {
+    let mut index = 2usize;
+    loop {
+        let label = format!("document-{index}");
+        if app.get_webview_window(&label).is_none() && !pending.contains_key(&label) {
+            return label;
+        }
+        index += 1;
+    }
+}
+
+fn build_document_window(app: &AppHandle, label: &str) -> Result<(), String> {
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+        .title("rhwp")
+        .inner_size(1440.0, 980.0)
+        .min_inner_size(960.0, 720.0)
+        .resizable(true)
+        .build()
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+fn queue_open_files(
+    app: &AppHandle,
+    startup: &StartupFiles,
+    startup_files: Vec<OpenDocumentResult>,
+    reuse_main_window: bool,
+) -> Result<(), String> {
+    if startup_files.is_empty() {
+        return Ok(());
+    }
+
+    let mut per_window = startup
+        .per_window
+        .lock()
+        .map_err(|_| "startup files map mutex".to_string())?;
+
+    let mut files = startup_files.into_iter();
+    if reuse_main_window {
+        if let Some(file) = files.next() {
+            per_window.insert("main".to_string(), vec![file]);
+        }
+    }
+
+    for file in files {
+        let label = next_document_window_label(app, &per_window);
+        per_window.insert(label.clone(), vec![file]);
+        build_document_window(app, &label)?;
+    }
+
+    Ok(())
+}
+
+fn prepare_startup_windows(app: &AppHandle, startup: &StartupFiles) -> Result<(), String> {
+    let startup_files = {
+        let mut guard = startup
+            .pending
+            .lock()
+            .map_err(|_| "startup files mutex".to_string())?;
+        std::mem::take(&mut *guard)
+    };
+
+    queue_open_files(app, startup, startup_files, true)
+}
+
+fn pending_mime_types(is_hwp_default: bool, is_hwpx_default: bool) -> Vec<String> {
+    let mut pending = Vec::new();
+    if !is_hwp_default {
+        pending.push(HWP_MIME.to_string());
+    }
+    if !is_hwpx_default {
+        pending.push(HWPX_MIME.to_string());
+    }
+    pending
+}
+
+fn unsupported_file_association_status() -> FileAssociationStatus {
+    FileAssociationStatus {
+        supported: false,
+        is_default: false,
+        message: "Desktop file association checks are not supported on this platform.".to_string(),
+        platform: "unsupported".to_string(),
+        action_mode: "none".to_string(),
+        default_app_hwp: None,
+        default_app_hwpx: None,
+        pending_mime_types: vec![HWP_MIME.to_string(), HWPX_MIME.to_string()],
+    }
+}
+
 fn load_file_association_status() -> Result<FileAssociationStatus, String> {
     #[cfg(target_os = "linux")]
     {
-        let default_hwp = query_default_app("application/x-hwp")?;
-        let default_hwpx = query_default_app("application/x-hwpx")?;
-        let mut pending = Vec::new();
-
-        if default_hwp.as_deref() != Some("rhwp.desktop") {
-            pending.push("application/x-hwp".to_string());
-        }
-        if default_hwpx.as_deref() != Some("rhwp.desktop") {
-            pending.push("application/x-hwpx".to_string());
-        }
-
+        let default_hwp = query_default_app(HWP_MIME)?;
+        let default_hwpx = query_default_app(HWPX_MIME)?;
+        let is_hwp_default = default_hwp.as_deref() == Some("rhwp.desktop");
+        let is_hwpx_default = default_hwpx.as_deref() == Some("rhwp.desktop");
+        let pending = pending_mime_types(is_hwp_default, is_hwpx_default);
         let is_default = pending.is_empty();
+
         return Ok(FileAssociationStatus {
             supported: true,
             is_default,
@@ -246,6 +376,31 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
                 "Set rhwp as the default app to open HWP and HWPX files by double click."
                     .to_string()
             },
+            platform: "linux".to_string(),
+            action_mode: "set-default".to_string(),
+            default_app_hwp: default_hwp,
+            default_app_hwpx: default_hwpx,
+            pending_mime_types: pending,
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let (is_hwp_default, default_hwp) = query_windows_default_handler(".hwp")?;
+        let (is_hwpx_default, default_hwpx) = query_windows_default_handler(".hwpx")?;
+        let pending = pending_mime_types(is_hwp_default, is_hwpx_default);
+        let is_default = pending.is_empty();
+
+        return Ok(FileAssociationStatus {
+            supported: true,
+            is_default,
+            message: if is_default {
+                "rhwp is already the default app for HWP and HWPX files.".to_string()
+            } else {
+                "Windows requires user confirmation for default apps. Open Default Apps Settings and choose rhwp for .hwp and .hwpx.".to_string()
+            },
+            platform: "windows".to_string(),
+            action_mode: "open-settings".to_string(),
             default_app_hwp: default_hwp,
             default_app_hwpx: default_hwpx,
             pending_mime_types: pending,
@@ -253,17 +408,7 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
     }
 
     #[allow(unreachable_code)]
-    Ok(FileAssociationStatus {
-        supported: false,
-        is_default: false,
-        message: "Desktop file association checks are supported on Linux only.".to_string(),
-        default_app_hwp: None,
-        default_app_hwpx: None,
-        pending_mime_types: vec![
-            "application/x-hwp".to_string(),
-            "application/x-hwpx".to_string(),
-        ],
-    })
+    Ok(unsupported_file_association_status())
 }
 
 #[cfg(target_os = "linux")]
@@ -284,35 +429,99 @@ fn query_default_app(mime_type: &str) -> Result<Option<String>, String> {
     }
 }
 
-fn prepare_startup_windows(app: &AppHandle, startup: &State<StartupFiles>) -> Result<(), String> {
-    let startup_files = {
-        let mut guard = startup.pending.lock().map_err(|_| "startup files mutex".to_string())?;
-        std::mem::take(&mut *guard)
+#[cfg(target_os = "windows")]
+fn query_registry_default_string(key: &RegKey) -> Option<String> {
+    key.get_value::<String, _>("")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn query_windows_prog_id(extension: &str) -> Result<Option<String>, String> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let user_choice_path = format!(
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{extension}\UserChoice"
+    );
+
+    if let Ok(key) = hkcu.open_subkey(&user_choice_path) {
+        if let Ok(prog_id) = key.get_value::<String, _>("ProgId") {
+            let trimmed = prog_id.trim();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed.to_string()));
+            }
+        }
+    }
+
+    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    let Ok(key) = hkcr.open_subkey(extension) else {
+        return Ok(None);
+    };
+    Ok(query_registry_default_string(&key))
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_windows_open_command(prog_id: &str) -> Result<Option<String>, String> {
+    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    let key_path = format!(r"{prog_id}\shell\open\command");
+    let Ok(key) = hkcr.open_subkey(&key_path) else {
+        return Ok(None);
+    };
+    Ok(query_registry_default_string(&key))
+}
+
+#[cfg(target_os = "windows")]
+fn parse_windows_command_executable(command: &str) -> Option<PathBuf> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let executable = if let Some(rest) = trimmed.strip_prefix('"') {
+        rest.split('"').next()?
+    } else {
+        trimmed.split_whitespace().next()?
     };
 
-    if startup_files.is_empty() {
-        return Ok(());
+    let path = PathBuf::from(executable);
+    if path.as_os_str().is_empty() {
+        None
+    } else {
+        Some(path)
     }
+}
 
-    let mut per_window = startup
-        .per_window
-        .lock()
-        .map_err(|_| "startup files map mutex".to_string())?;
-    per_window.insert("main".to_string(), vec![startup_files[0].clone()]);
+#[cfg(target_os = "windows")]
+fn current_executable_path() -> Option<PathBuf> {
+    let path = std::env::current_exe().ok()?;
+    Some(fs::canonicalize(&path).unwrap_or(path))
+}
 
-    for (index, file) in startup_files.into_iter().enumerate().skip(1) {
-        let label = format!("document-{}", index + 1);
-        per_window.insert(label.clone(), vec![file]);
-        WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
-            .title("rhwp")
-            .inner_size(1440.0, 980.0)
-            .min_inner_size(960.0, 720.0)
-            .resizable(true)
-            .build()
-            .map_err(|err| err.to_string())?;
-    }
+#[cfg(target_os = "windows")]
+fn is_current_executable(path: &Path) -> bool {
+    let Some(current) = current_executable_path() else {
+        return false;
+    };
+    let candidate = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    candidate
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&current.to_string_lossy())
+}
 
-    Ok(())
+#[cfg(target_os = "windows")]
+fn query_windows_default_handler(extension: &str) -> Result<(bool, Option<String>), String> {
+    let Some(prog_id) = query_windows_prog_id(extension)? else {
+        return Ok((false, None));
+    };
+    let Some(command) = resolve_windows_open_command(&prog_id)? else {
+        return Ok((false, Some(prog_id)));
+    };
+    let Some(executable) = parse_windows_command_executable(&command) else {
+        return Ok((false, Some(command)));
+    };
+
+    let resolved = executable.to_string_lossy().to_string();
+    Ok((is_current_executable(&executable), Some(resolved)))
 }
 
 #[tauri::command]
@@ -389,18 +598,39 @@ fn get_file_association_status() -> Result<FileAssociationStatus, String> {
 fn set_default_file_association() -> Result<FileAssociationStatus, String> {
     #[cfg(target_os = "linux")]
     {
-        for mime_type in ["application/x-hwp", "application/x-hwpx"] {
+        for mime_type in [HWP_MIME, HWPX_MIME] {
             let status = std::process::Command::new("xdg-mime")
                 .args(["default", "rhwp.desktop", mime_type])
                 .status()
                 .map_err(|err| err.to_string())?;
             if !status.success() {
-                return Err(format!("xdg-mime failed for {}", mime_type));
+                return Err(format!("xdg-mime failed for {mime_type}"));
             }
         }
+
+        return load_file_association_status();
     }
 
-    load_file_association_status()
+    #[cfg(target_os = "windows")]
+    {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "start", "", "ms-settings:defaultapps"])
+            .status()
+            .map_err(|err| err.to_string())?;
+        if !status.success() {
+            return Err("failed to open Windows Default Apps settings".to_string());
+        }
+
+        let mut association_status = load_file_association_status()?;
+        if !association_status.is_default {
+            association_status.message =
+                "Windows Default Apps Settings opened. Choose rhwp for .hwp and .hwpx.".to_string();
+        }
+        return Ok(association_status);
+    }
+
+    #[allow(unreachable_code)]
+    Ok(unsupported_file_association_status())
 }
 
 #[tauri::command]
@@ -457,7 +687,8 @@ fn write_recovery_snapshot(
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    fs::write(recovery_data_path(&dir, &snapshot_id), request.bytes).map_err(|err| err.to_string())?;
+    fs::write(recovery_data_path(&dir, &snapshot_id), request.bytes)
+        .map_err(|err| err.to_string())?;
     fs::write(
         recovery_meta_path(&dir, &snapshot_id),
         serde_json::to_vec_pretty(&meta).map_err(|err| err.to_string())?,
@@ -496,7 +727,18 @@ fn reveal_in_folder(path: String) -> Result<(), String> {
         return Ok(());
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
+    {
+        let target = PathBuf::from(path);
+        let selection = format!("/select,\"{}\"", target.to_string_lossy());
+        std::process::Command::new("explorer.exe")
+            .arg(selection)
+            .spawn()
+            .map_err(|err| err.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let _ = &path;
 
     #[allow(unreachable_code)]
@@ -518,6 +760,18 @@ fn emit_startup_files<R: Runtime>(window: &Webview<R>, startup: &State<StartupFi
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let cwd_path = if cwd.trim().is_empty() {
+                None
+            } else {
+                Some(Path::new(cwd.as_str()))
+            };
+            let startup = app.state::<StartupFiles>();
+            let files = collect_startup_files_from_args(args, cwd_path);
+            if let Err(err) = queue_open_files(app, startup.inner(), files, false) {
+                eprintln!("failed to queue startup files from secondary instance: {err}");
+            }
+        }))
         .manage(StartupFiles {
             pending: Mutex::new(collect_startup_files()),
             per_window: Mutex::new(HashMap::new()),
@@ -536,7 +790,8 @@ fn main() {
         ])
         .setup(|app| {
             let startup = app.state::<StartupFiles>();
-            prepare_startup_windows(app.handle(), &startup)?;
+            let handle = app.handle().clone();
+            prepare_startup_windows(&handle, startup.inner()).map_err(std::io::Error::other)?;
             Ok(())
         })
         .on_page_load(|window, _| {

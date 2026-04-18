@@ -365,10 +365,18 @@ function renderSessionBanner(): void {
   const parts: string[] = [];
   const actions: Array<{ label: string; handler: () => Promise<void> }> = [];
 
-  if (session.associationStatus?.supported && !session.associationStatus.isDefault) {
+  if (
+    session.associationStatus?.supported
+    && !session.associationStatus.isDefault
+    && session.associationStatus.actionMode !== 'none'
+  ) {
+    const associationActionLabel = session.associationStatus.actionMode === 'open-settings'
+      ? 'Open Default Apps Settings'
+      : 'Set as default app';
+
     parts.push(session.associationStatus.message);
     actions.push({
-      label: '기본 앱으로 설정',
+      label: associationActionLabel,
       handler: async () => {
         documentSession.setAssociationStatus(await documentIO.setDefaultFileAssociation());
         renderSessionBanner();
