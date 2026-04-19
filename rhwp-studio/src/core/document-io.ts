@@ -69,6 +69,7 @@ export interface WriteRecoverySnapshotRequest {
 
 export interface RhwpDesktopBridge {
   openDocument?: () => Promise<OpenDocumentResult | null>;
+  consumeStartupFiles?: () => Promise<OpenDocumentResult[]>;
   saveDocument: (request: SaveDocumentRequest) => Promise<SaveDocumentResult | null>;
   getRecentDocuments?: () => Promise<RecentDocument[]>;
   getFileAssociationStatus?: () => Promise<FileAssociationStatus>;
@@ -84,6 +85,7 @@ export interface RhwpDesktopBridge {
 export interface DocumentIO {
   readonly kind: 'web' | 'desktop';
   openWithPicker(): Promise<OpenDocumentResult | null>;
+  consumeStartupFiles(): Promise<OpenDocumentResult[]>;
   saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null>;
   getRecentDocuments(): Promise<RecentDocument[]>;
   rememberRecentDocument(doc: RecentDocument): Promise<void>;
@@ -95,6 +97,27 @@ export interface DocumentIO {
   deleteRecoverySnapshot(snapshotId: string): Promise<void>;
   revealInFolder(path: string): Promise<void>;
   onOpenFiles(handler: (files: OpenDocumentResult[]) => void): void;
+}
+
+function normalizeOpenDocumentResult(result: OpenDocumentResult | null): OpenDocumentResult | null {
+  if (!result) {
+    return null;
+  }
+
+  return {
+    ...result,
+    data: result.data instanceof Uint8Array ? result.data : new Uint8Array(result.data),
+  };
+}
+
+function normalizeOpenDocumentResults(results: OpenDocumentResult[] | null | undefined): OpenDocumentResult[] {
+  if (!Array.isArray(results)) {
+    return [];
+  }
+
+  return results
+    .map((result) => normalizeOpenDocumentResult(result))
+    .filter((result): result is OpenDocumentResult => result !== null);
 }
 
 function getMimeType(format: DocumentFormat): string {
@@ -130,6 +153,10 @@ class WebDocumentIO implements DocumentIO {
 
   async openWithPicker(): Promise<OpenDocumentResult | null> {
     return null;
+  }
+
+  async consumeStartupFiles(): Promise<OpenDocumentResult[]> {
+    return [];
   }
 
   async saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null> {
@@ -243,7 +270,18 @@ class DesktopDocumentIO implements DocumentIO {
   constructor(private bridge: RhwpDesktopBridge) {}
 
   async openWithPicker(): Promise<OpenDocumentResult | null> {
-    return this.bridge.openDocument ? this.bridge.openDocument() : null;
+    if (!this.bridge.openDocument) {
+      return null;
+    }
+
+    return normalizeOpenDocumentResult(await this.bridge.openDocument());
+  }
+
+  async consumeStartupFiles(): Promise<OpenDocumentResult[]> {
+    if (this.bridge.consumeStartupFiles) {
+      return normalizeOpenDocumentResults(await this.bridge.consumeStartupFiles());
+    }
+    return [];
   }
 
   async saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null> {
@@ -312,8 +350,23 @@ class DesktopDocumentIO implements DocumentIO {
   }
 
   onOpenFiles(handler: (files: OpenDocumentResult[]) => void): void {
-    this.bridge.onOpenFiles?.(handler);
+    this.bridge.onOpenFiles?.((files) => {
+      handler(normalizeOpenDocumentResults(files));
+    });
   }
+}
+
+function createActiveDesktopDocumentIO(): DesktopDocumentIO | null {
+  if (window.__RHWP_DESKTOP__) {
+    return new DesktopDocumentIO(window.__RHWP_DESKTOP__);
+  }
+
+  const tauriBridge = createTauriBridge();
+  if (tauriBridge) {
+    return new DesktopDocumentIO(tauriBridge);
+  }
+
+  return null;
 }
 
 function createTauriBridge(): RhwpDesktopBridge | null {
@@ -322,6 +375,7 @@ function createTauriBridge(): RhwpDesktopBridge | null {
 
   return {
     openDocument: () => invoke<OpenDocumentResult | null>('open_document'),
+    consumeStartupFiles: () => invoke<OpenDocumentResult[]>('consume_startup_files'),
     saveDocument: (request) => invoke<SaveDocumentResult | null>('save_document', { request }),
     getRecentDocuments: () => invoke<RecentDocument[]>('get_recent_documents'),
     getFileAssociationStatus: () => invoke<FileAssociationStatus>('get_file_association_status'),
@@ -341,13 +395,50 @@ function createTauriBridge(): RhwpDesktopBridge | null {
 }
 
 export function createDocumentIO(): DocumentIO {
-  if (window.__RHWP_DESKTOP__) {
-    return new DesktopDocumentIO(window.__RHWP_DESKTOP__);
-  }
+  const webDocumentIO = new WebDocumentIO();
 
-  const tauriBridge = createTauriBridge();
-  if (tauriBridge) {
-    return new DesktopDocumentIO(tauriBridge);
-  }
-  return new WebDocumentIO();
+  return {
+    get kind() {
+      return createActiveDesktopDocumentIO() ? 'desktop' : 'web';
+    },
+    async openWithPicker() {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).openWithPicker();
+    },
+    async consumeStartupFiles() {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).consumeStartupFiles();
+    },
+    async saveDocument(request) {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).saveDocument(request);
+    },
+    async getRecentDocuments() {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).getRecentDocuments();
+    },
+    async rememberRecentDocument(doc) {
+      await (createActiveDesktopDocumentIO() ?? webDocumentIO).rememberRecentDocument(doc);
+    },
+    async getFileAssociationStatus() {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).getFileAssociationStatus();
+    },
+    async setDefaultFileAssociation() {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).setDefaultFileAssociation();
+    },
+    async listRecoverySnapshots() {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).listRecoverySnapshots();
+    },
+    async readRecoverySnapshot(snapshotId) {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).readRecoverySnapshot(snapshotId);
+    },
+    async writeRecoverySnapshot(request) {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).writeRecoverySnapshot(request);
+    },
+    async deleteRecoverySnapshot(snapshotId) {
+      await (createActiveDesktopDocumentIO() ?? webDocumentIO).deleteRecoverySnapshot(snapshotId);
+    },
+    async revealInFolder(path) {
+      await (createActiveDesktopDocumentIO() ?? webDocumentIO).revealInFolder(path);
+    },
+    onOpenFiles(handler) {
+      createActiveDesktopDocumentIO()?.onOpenFiles(handler);
+    },
+  };
 }

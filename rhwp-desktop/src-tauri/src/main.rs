@@ -10,9 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{
-    AppHandle, Emitter, Manager, Runtime, State, Webview, WebviewUrl, WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, Window};
 
 #[cfg(target_os = "windows")]
 use winreg::{
@@ -544,6 +542,18 @@ fn open_document(app: AppHandle) -> Result<Option<OpenDocumentResult>, String> {
 }
 
 #[tauri::command]
+fn consume_startup_files(
+    window: Window,
+    startup: State<StartupFiles>,
+) -> Result<Vec<OpenDocumentResult>, String> {
+    let mut guard = startup
+        .per_window
+        .lock()
+        .map_err(|_| "startup files map mutex".to_string())?;
+    Ok(guard.remove(window.label()).unwrap_or_default())
+}
+
+#[tauri::command]
 fn save_document(
     app: AppHandle,
     request: SaveDocumentRequest,
@@ -749,19 +759,6 @@ fn reveal_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
-fn emit_startup_files<R: Runtime>(window: &Webview<R>, startup: &State<StartupFiles>) {
-    let payload = {
-        let mut guard = startup.per_window.lock().expect("startup files map mutex");
-        guard.remove(window.label()).unwrap_or_default()
-    };
-
-    if payload.is_empty() {
-        return;
-    }
-
-    let _ = window.emit("rhwp://open-files", payload);
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -782,6 +779,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            consume_startup_files,
             save_document,
             get_recent_documents,
             get_file_association_status,
@@ -797,9 +795,6 @@ fn main() {
             let handle = app.handle().clone();
             prepare_startup_windows(&handle, startup.inner()).map_err(std::io::Error::other)?;
             Ok(())
-        })
-        .on_page_load(|window, _| {
-            emit_startup_files(window, &window.state::<StartupFiles>());
         })
         .run(tauri::generate_context!())
         .expect("error while running rhwp-desktop");

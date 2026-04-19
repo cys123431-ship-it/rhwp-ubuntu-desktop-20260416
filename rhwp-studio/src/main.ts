@@ -828,6 +828,18 @@ function setupFileInput(): void {
 }
 
 function setupDocumentIOListeners(): void {
+  const openIncomingFiles = async (files: OpenDocumentResult[]): Promise<void> => {
+    startupFilesReceived = files.length > 0;
+    const first = files[0];
+    if (!first) return;
+    const okayToOpen = await confirmDiscardIfDirty(
+      '문서 열기',
+      '저장하지 않은 변경 사항이 있습니다.\n현재 문서를 닫고 다른 문서를 열까요?',
+    );
+    if (!okayToOpen) return;
+    await loadOpenResult(first);
+  };
+
   eventBus.on('request-open-document', async () => {
     const okayToOpen = await confirmDiscardIfDirty(
       '문서 열기',
@@ -847,16 +859,21 @@ function setupDocumentIOListeners(): void {
   });
 
   documentIO.onOpenFiles(async (files) => {
-    startupFilesReceived = files.length > 0;
-    const first = files[0];
-    if (!first) return;
-    const okayToOpen = await confirmDiscardIfDirty(
-      '문서 열기',
-      '저장하지 않은 변경 사항이 있습니다.\n현재 문서를 닫고 다른 문서를 열까요?',
-    );
-    if (!okayToOpen) return;
-    await loadOpenResult(first);
+    try {
+      await openIncomingFiles(files);
+    } catch (error) {
+      console.error('[desktop] failed to open files from runtime event', error);
+    }
   });
+
+  void (async () => {
+    try {
+      const startupFiles = await documentIO.consumeStartupFiles();
+      await openIncomingFiles(startupFiles);
+    } catch (error) {
+      console.error('[desktop] failed to consume startup files', error);
+    }
+  })();
 }
 
 function setupZoomControls(): void {
