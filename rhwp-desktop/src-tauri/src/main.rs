@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -348,7 +353,7 @@ fn unsupported_file_association_status() -> FileAssociationStatus {
     FileAssociationStatus {
         supported: false,
         is_default: false,
-        message: "Desktop file association checks are not supported on this platform.".to_string(),
+        message: "이 플랫폼에서는 파일 연결 상태를 확인할 수 없습니다.".to_string(),
         platform: "unsupported".to_string(),
         action_mode: "none".to_string(),
         default_app_hwp: None,
@@ -371,10 +376,9 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
             supported: true,
             is_default,
             message: if is_default {
-                "rhwp is already the default app for HWP and HWPX files.".to_string()
+                "rhwp가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
             } else {
-                "Set rhwp as the default app to open HWP and HWPX files by double click."
-                    .to_string()
+                "HWP/HWPX 파일을 더블클릭하면 rhwp로 열리도록 기본 앱으로 설정하세요.".to_string()
             },
             platform: "linux".to_string(),
             action_mode: "set-default".to_string(),
@@ -395,9 +399,9 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
             supported: true,
             is_default,
             message: if is_default {
-                "rhwp is already the default app for HWP and HWPX files.".to_string()
+                "rhwp가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
             } else {
-                "Windows requires user confirmation for default apps. Open Default Apps Settings and choose rhwp for .hwp and .hwpx.".to_string()
+                "Windows에서는 기본 앱을 사용자가 확인해야 합니다. 기본 앱 설정을 열어 .hwp와 .hwpx에 rhwp를 선택하세요.".to_string()
             },
             platform: "windows".to_string(),
             action_mode: "open-settings".to_string(),

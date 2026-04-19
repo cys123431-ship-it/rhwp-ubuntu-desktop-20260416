@@ -359,6 +359,39 @@ function syncSessionFromWasm(): void {
   renderSessionBanner();
 }
 
+function translateBannerMessage(message: string): string {
+  switch (message.trim()) {
+    case 'Layout may differ if required Hancom fonts are missing on this system.':
+      return '이 시스템에 필요한 한컴 글꼴이 없으면 문서 레이아웃이 달라질 수 있습니다.';
+    case 'Encrypted documents open in protected view during phase 1.':
+      return '암호화된 문서는 1단계에서는 보호 보기로 열립니다.';
+    case 'Distribution documents open in protected view to avoid save corruption.':
+      return '배포용 문서는 저장 손상을 막기 위해 보호 보기로 열립니다.';
+    default:
+      return message.trim();
+  }
+}
+
+function formatBannerMessages(messages: string[]): string[] {
+  return messages
+    .map((message) => translateBannerMessage(message))
+    .filter((message) => message.length > 0);
+}
+
+function formatFontSubstitutionSummary(session: DocumentSession): string | null {
+  const substitutedFonts = session.fontSubstitutions.filter((item) => item.substituted);
+  if (substitutedFonts.length === 0) {
+    return null;
+  }
+
+  const preview = substitutedFonts
+    .slice(0, 3)
+    .map((item) => `${item.original} -> ${item.resolved}`)
+    .join(', ');
+  const suffix = substitutedFonts.length > 3 ? ` 외 ${substitutedFonts.length - 3}개` : '';
+  return `대체 글꼴 사용 중: ${preview}${suffix}`;
+}
+
 function renderSessionBanner(): void {
   const banner = sessionBanner();
   const session = documentSession.current;
@@ -371,10 +404,10 @@ function renderSessionBanner(): void {
     && session.associationStatus.actionMode !== 'none'
   ) {
     const associationActionLabel = session.associationStatus.actionMode === 'open-settings'
-      ? 'Open Default Apps Settings'
-      : 'Set as default app';
+      ? '기본 앱 설정 열기'
+      : '기본 앱으로 설정';
 
-    parts.push(session.associationStatus.message);
+    parts.push(translateBannerMessage(session.associationStatus.message));
     actions.push({
       label: associationActionLabel,
       handler: async () => {
@@ -385,20 +418,15 @@ function renderSessionBanner(): void {
   }
 
   if (session.hasDocument && session.isProtected) {
-    parts.push(`Protected view: ${session.blockers.join(' ')}`);
+    parts.push(`보호 보기: ${formatBannerMessages(session.blockers).join(' ')}`);
   }
   if (session.hasDocument && session.warnings.length > 0) {
-    parts.push(session.warnings.join(' '));
+    parts.push(formatBannerMessages(session.warnings).join(' '));
   }
   if (session.hasDocument) {
-    const substitutedFonts = session.fontSubstitutions.filter((item) => item.substituted);
-    if (substitutedFonts.length > 0) {
-      const preview = substitutedFonts
-        .slice(0, 3)
-        .map((item) => `${item.original}->${item.resolved}`)
-        .join(', ');
-      const suffix = substitutedFonts.length > 3 ? ` and ${substitutedFonts.length - 3} more` : '';
-      parts.push(`Font substitutions active: ${preview}${suffix}`);
+    const fontSummary = formatFontSubstitutionSummary(session);
+    if (fontSummary) {
+      parts.push(fontSummary);
     }
   }
 
