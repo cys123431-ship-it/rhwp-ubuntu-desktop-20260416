@@ -33,12 +33,12 @@
 
 ### Ubuntu
 
-1. GitHub Releases에서 `rhwp_0.1.0_amd64.deb` 파일을 받습니다.
+1. GitHub Releases에서 최신 `rhwp_*_amd64.deb` 파일을 받습니다.
 2. 우분투 터미널에서 아래 명령으로 설치합니다.
 
 ```bash
 cd ~/Downloads
-sudo apt install ./rhwp_0.1.0_amd64.deb
+sudo apt install ./rhwp_*_amd64.deb
 ```
 
 설치 후에는 앱 목록에서 `rhwp`를 실행할 수 있고, 시스템 파일 연결이 적용되면 `.hwp`, `.hwpx` 파일을 더블 클릭해서 열 수 있습니다.
