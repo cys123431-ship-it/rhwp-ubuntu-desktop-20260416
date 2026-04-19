@@ -1,6 +1,6 @@
 {
   "name": "rhwp-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "tauri build",
     "build:linux": "tauri build --config src-tauri/tauri.linux.conf.json --target x86_64-unknown-linux-gnu",
     "build:windows": "tauri build --config src-tauri/tauri.windows.conf.json --target x86_64-pc-windows-msvc",
+    "build:windows:current-user": "tauri build --config src-tauri/tauri.windows.currentuser.conf.json --target x86_64-pc-windows-msvc",
     "e2e:installed": "node --test e2e/*.mjs"
   },
   "devDependencies": {

@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -5,9 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{
-    AppHandle, Emitter, Manager, Runtime, State, Webview, WebviewUrl, WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, Window};
 
 #[cfg(target_os = "windows")]
 use winreg::{
@@ -348,7 +351,7 @@ fn unsupported_file_association_status() -> FileAssociationStatus {
     FileAssociationStatus {
         supported: false,
         is_default: false,
-        message: "Desktop file association checks are not supported on this platform.".to_string(),
+        message: "이 플랫폼에서는 파일 연결 상태를 확인할 수 없습니다.".to_string(),
         platform: "unsupported".to_string(),
         action_mode: "none".to_string(),
         default_app_hwp: None,
@@ -371,10 +374,9 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
             supported: true,
             is_default,
             message: if is_default {
-                "rhwp is already the default app for HWP and HWPX files.".to_string()
+                "rhwp가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
             } else {
-                "Set rhwp as the default app to open HWP and HWPX files by double click."
-                    .to_string()
+                "HWP/HWPX 파일을 더블클릭하면 rhwp로 열리도록 기본 앱으로 설정하세요.".to_string()
             },
             platform: "linux".to_string(),
             action_mode: "set-default".to_string(),
@@ -395,9 +397,9 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
             supported: true,
             is_default,
             message: if is_default {
-                "rhwp is already the default app for HWP and HWPX files.".to_string()
+                "rhwp가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
             } else {
-                "Windows requires user confirmation for default apps. Open Default Apps Settings and choose rhwp for .hwp and .hwpx.".to_string()
+                "Windows에서는 기본 앱을 사용자가 확인해야 합니다. 기본 앱 설정을 열어 .hwp와 .hwpx에 rhwp를 선택하세요.".to_string()
             },
             platform: "windows".to_string(),
             action_mode: "open-settings".to_string(),
@@ -537,6 +539,18 @@ fn open_document(app: AppHandle) -> Result<Option<OpenDocumentResult>, String> {
     let format = format_from_path(&path);
     remember_recent_document(&app, &path, &format)?;
     open_path(&path).map(Some)
+}
+
+#[tauri::command]
+fn consume_startup_files(
+    window: Window,
+    startup: State<StartupFiles>,
+) -> Result<Vec<OpenDocumentResult>, String> {
+    let mut guard = startup
+        .per_window
+        .lock()
+        .map_err(|_| "startup files map mutex".to_string())?;
+    Ok(guard.remove(window.label()).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -745,19 +759,6 @@ fn reveal_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
-fn emit_startup_files<R: Runtime>(window: &Webview<R>, startup: &State<StartupFiles>) {
-    let payload = {
-        let mut guard = startup.per_window.lock().expect("startup files map mutex");
-        guard.remove(window.label()).unwrap_or_default()
-    };
-
-    if payload.is_empty() {
-        return;
-    }
-
-    let _ = window.emit("rhwp://open-files", payload);
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -778,6 +779,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            consume_startup_files,
             save_document,
             get_recent_documents,
             get_file_association_status,
@@ -793,9 +795,6 @@ fn main() {
             let handle = app.handle().clone();
             prepare_startup_windows(&handle, startup.inner()).map_err(std::io::Error::other)?;
             Ok(())
-        })
-        .on_page_load(|window, _| {
-            emit_startup_files(window, &window.state::<StartupFiles>());
         })
         .run(tauri::generate_context!())
         .expect("error while running rhwp-desktop");

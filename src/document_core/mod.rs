@@ -189,6 +189,12 @@ pub struct ActiveFieldInfo {
 }
 
 impl DocumentCore {
+    fn has_font_substitutions(&self) -> bool {
+        self.font_substitution_entries()
+            .into_iter()
+            .any(|(_, _, _, substituted)| substituted)
+    }
+
     fn compatibility_issue_entries(&self) -> Vec<(&'static str, &'static str, String)> {
         let mut issues = Vec::new();
 
@@ -207,7 +213,7 @@ impl DocumentCore {
                     .to_string(),
             ));
         }
-        if !self.document.doc_info.font_faces.is_empty() {
+        if self.has_font_substitutions() {
             issues.push((
                 "font-substitution",
                 "warning",
@@ -328,7 +334,7 @@ impl DocumentCore {
     pub fn document_warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
 
-        if !self.document.doc_info.font_faces.is_empty() {
+        if self.has_font_substitutions() {
             warnings.push(
                 "Layout may differ if required Hancom fonts are missing on this system."
                     .to_string(),
@@ -664,6 +670,30 @@ mod tests {
         assert!(items
             .iter()
             .any(|item| { item["lang"] == "hangul" && item["original"] == "CustomMissingFont" }));
+    }
+
+    #[test]
+    fn document_warnings_only_show_font_warning_when_substitution_happens() {
+        let mut core = DocumentCore::new_empty();
+        core.document.doc_info.font_faces = vec![vec![Font {
+            name: "함초롬바탕".to_string(),
+            ..Default::default()
+        }]];
+
+        assert!(!core
+            .document_warnings()
+            .iter()
+            .any(|warning| warning.contains("Hancom fonts")));
+
+        core.document.doc_info.font_faces = vec![vec![Font {
+            name: "한컴바탕".to_string(),
+            ..Default::default()
+        }]];
+
+        assert!(core
+            .document_warnings()
+            .iter()
+            .any(|warning| warning.contains("Hancom fonts")));
     }
 
     #[test]
