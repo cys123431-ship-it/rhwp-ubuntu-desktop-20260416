@@ -61,6 +61,7 @@ Ubuntu packaging assets live under [packaging/linux](./packaging/linux).
 2. Run `npm run build:windows` inside `rhwp-desktop`.
 3. Pick up the generated installers from `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/`.
 4. Tag builds can sign the installers when `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD` are configured in GitHub Actions.
+5. For local testing without a publicly trusted certificate, use `packaging/windows/sign-release-assets.ps1` to generate a self-signed code-signing certificate, sign the Windows installers, and export the public `.cer` file for manual trust installation.
 
 ## CI and releases
 
