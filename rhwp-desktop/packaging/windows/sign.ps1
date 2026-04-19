@@ -5,6 +5,29 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Find-SignTool {
+  $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+  if ($command) {
+    return $command.Source
+  }
+
+  $kitsRoot = 'C:\Program Files (x86)\Windows Kits\10\bin'
+  if (-not (Test-Path -LiteralPath $kitsRoot)) {
+    throw 'signtool.exe was not found in PATH or Windows Kits.'
+  }
+
+  $candidate = Get-ChildItem -LiteralPath $kitsRoot -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+
+  if (-not $candidate) {
+    throw 'signtool.exe was not found in Windows Kits.'
+  }
+
+  return $candidate.FullName
+}
+
 if (-not (Test-Path -LiteralPath $BinaryPath)) {
   throw "Binary to sign was not found: $BinaryPath"
 }
@@ -27,7 +50,7 @@ $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) {
   $env:WINDOWS_TIMESTAMP_URL
 }
 
-$signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
+$signTool = Find-SignTool
 
 & $signTool sign `
   /fd SHA256 `
