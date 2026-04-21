@@ -188,13 +188,52 @@ jobs:
             'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Applications\rhwp.exe\SupportedTypes'
           )
           $supportedTypesKey = $candidateKeys | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $supportedTypesKey) {
-            throw "SupportedTypes registry key for rhwp.exe was not found."
-          }
+          if ($supportedTypesKey) {
+            $supportedTypes = (Get-ItemProperty $supportedTypesKey).PSObject.Properties.Name
+            if ($supportedTypes -notcontains '.hwp' -or $supportedTypes -notcontains '.hwpx') {
+              throw "Expected .hwp and .hwpx associations were not registered."
+            }
+          } else {
+            $associationRoots = @(
+              'Registry::HKEY_CLASSES_ROOT',
+              'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes'
+            )
 
-          $supportedTypes = (Get-ItemProperty $supportedTypesKey).PSObject.Properties.Name
-          if ($supportedTypes -notcontains '.hwp' -or $supportedTypes -notcontains '.hwpx') {
-            throw "Expected .hwp and .hwpx associations were not registered."
+            foreach ($extension in @('.hwp', '.hwpx')) {
+              $progId = $null
+              foreach ($root in $associationRoots) {
+                $extensionKey = "$root\$extension"
+                if (-not (Test-Path $extensionKey)) {
+                  continue
+                }
+                $candidate = (Get-ItemProperty $extensionKey).'(default)'
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                  $progId = $candidate
+                  break
+                }
+              }
+
+              if ([string]::IsNullOrWhiteSpace($progId)) {
+                throw "File association for $extension was not registered."
+              }
+
+              $command = $null
+              foreach ($root in $associationRoots) {
+                $commandKey = "$root\$progId\shell\open\command"
+                if (-not (Test-Path $commandKey)) {
+                  continue
+                }
+                $candidate = (Get-ItemProperty $commandKey).'(default)'
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                  $command = $candidate
+                  break
+                }
+              }
+
+              if ([string]::IsNullOrWhiteSpace($command) -or $command -notmatch 'rhwp\.exe') {
+                throw "Open command for $extension does not point to rhwp.exe."
+              }
+            }
           }
 
       - name: Verify startup open by command line
@@ -270,13 +309,52 @@ jobs:
             'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Applications\rhwp.exe\SupportedTypes'
           )
           $supportedTypesKey = $candidateKeys | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $supportedTypesKey) {
-            throw "SupportedTypes registry key for rhwp.exe was not found."
-          }
+          if ($supportedTypesKey) {
+            $supportedTypes = (Get-ItemProperty $supportedTypesKey).PSObject.Properties.Name
+            if ($supportedTypes -notcontains '.hwp' -or $supportedTypes -notcontains '.hwpx') {
+              throw "Expected .hwp and .hwpx associations were not registered."
+            }
+          } else {
+            $associationRoots = @(
+              'Registry::HKEY_CLASSES_ROOT',
+              'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes'
+            )
 
-          $supportedTypes = (Get-ItemProperty $supportedTypesKey).PSObject.Properties.Name
-          if ($supportedTypes -notcontains '.hwp' -or $supportedTypes -notcontains '.hwpx') {
-            throw "Expected .hwp and .hwpx associations were not registered."
+            foreach ($extension in @('.hwp', '.hwpx')) {
+              $progId = $null
+              foreach ($root in $associationRoots) {
+                $extensionKey = "$root\$extension"
+                if (-not (Test-Path $extensionKey)) {
+                  continue
+                }
+                $candidate = (Get-ItemProperty $extensionKey).'(default)'
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                  $progId = $candidate
+                  break
+                }
+              }
+
+              if ([string]::IsNullOrWhiteSpace($progId)) {
+                throw "File association for $extension was not registered."
+              }
+
+              $command = $null
+              foreach ($root in $associationRoots) {
+                $commandKey = "$root\$progId\shell\open\command"
+                if (-not (Test-Path $commandKey)) {
+                  continue
+                }
+                $candidate = (Get-ItemProperty $commandKey).'(default)'
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                  $command = $candidate
+                  break
+                }
+              }
+
+              if ([string]::IsNullOrWhiteSpace($command) -or $command -notmatch 'rhwp\.exe') {
+                throw "Open command for $extension does not point to rhwp.exe."
+              }
+            }
           }
 
       - name: Verify startup open by command line
