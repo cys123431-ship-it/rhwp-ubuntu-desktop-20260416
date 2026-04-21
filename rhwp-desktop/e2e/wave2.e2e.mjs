@@ -5,7 +5,7 @@ import { access, cp, mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, afterEach, before, beforeEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Builder, Capabilities } from 'selenium-webdriver';
 
@@ -22,6 +22,7 @@ const settingsPattern = /settings|설정/i;
 
 let tauriDriverProcess;
 let tempRoot = '';
+const spawnedInstances = new Set();
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,6 +73,42 @@ async function waitFor(predicate, timeoutMs, label) {
   }
 
   throw new Error(`Timed out waiting for ${label}`);
+}
+
+async function runCleanupProcess(command, args) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: 'ignore', windowsHide: true });
+    child.once('error', reject);
+    child.once('exit', () => resolve());
+  });
+}
+
+async function terminateInstalledProcesses() {
+  try {
+    if (isWindows) {
+      const escapedPath = installedBinary.replace(/'/g, "''");
+      await runCleanupProcess('pwsh', [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `
+          $path = '${escapedPath}'
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ieq $path } |
+            ForEach-Object {
+              try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
+            }
+        `,
+      ]);
+    } else {
+      await runCleanupProcess('pkill', ['-f', installedBinary]).catch(() => {});
+    }
+  } catch {
+    // Best-effort cleanup for CI isolation.
+  }
+
+  await delay(500);
 }
 
 async function createTempCopy(relativeSourcePath, targetName) {
@@ -131,15 +168,12 @@ async function launchAdditionalInstance(args = []) {
     stdio: 'ignore',
     windowsHide: true,
   });
+  spawnedInstances.add(child);
 
   await Promise.race([
     once(child, 'exit'),
-    delay(5000),
+    delay(15000),
   ]);
-
-  if (!child.killed && child.exitCode === null) {
-    child.kill();
-  }
 }
 
 before(async () => {
@@ -152,6 +186,24 @@ before(async () => {
   });
   await waitForPort(tauriDriverHost, tauriDriverPort, 30000);
 }, { timeout: 120000 });
+
+beforeEach(async () => {
+  await terminateInstalledProcesses();
+}, { timeout: 30000 });
+
+afterEach(async () => {
+  await terminateInstalledProcesses();
+  for (const child of [...spawnedInstances]) {
+    if (!child.killed && child.exitCode === null) {
+      child.kill();
+      await Promise.race([
+        once(child, 'exit'),
+        delay(5000),
+      ]).catch(() => {});
+    }
+    spawnedInstances.delete(child);
+  }
+}, { timeout: 30000 });
 
 after(async () => {
   if (tauriDriverProcess && !tauriDriverProcess.killed) {
