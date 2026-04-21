@@ -59,6 +59,7 @@ type RhwpE2EBridge = {
   isReady: () => boolean;
   getRuntimeState: () => RhwpE2ERuntimeState;
   clickBannerAction: (label?: string) => Promise<boolean>;
+  openDocumentAtPath: (filePath: string) => Promise<boolean>;
   markDocumentDirty: () => Promise<boolean>;
   appendTextToParagraph: (text: string, sectionIndex?: number, paragraphIndex?: number) => Promise<boolean>;
   saveCurrentDocument: () => Promise<boolean>;
@@ -231,6 +232,16 @@ async function clickBannerAction(label?: string): Promise<boolean> {
   return true;
 }
 
+async function openDocumentAtPath(filePath: string): Promise<boolean> {
+  const result = await documentIO.openAtPath(filePath);
+  if (!result) {
+    return false;
+  }
+
+  await loadOpenResult(result);
+  return true;
+}
+
 async function markDocumentDirty(): Promise<boolean> {
   if (!documentSession.current.hasDocument || documentSession.current.isProtected) {
     return false;
@@ -297,6 +308,7 @@ function installE2EBridge(): void {
     isReady: () => e2eReady,
     getRuntimeState,
     clickBannerAction,
+    openDocumentAtPath,
     markDocumentDirty,
     appendTextToParagraph,
     saveCurrentDocument,

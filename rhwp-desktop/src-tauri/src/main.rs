@@ -566,6 +566,18 @@ fn open_document(app: AppHandle) -> Result<Option<OpenDocumentResult>, String> {
 }
 
 #[tauri::command]
+fn open_document_at_path(app: AppHandle, path: String) -> Result<OpenDocumentResult, String> {
+    let path = PathBuf::from(path);
+    if !path_has_supported_document_extension(&path) {
+        return Err("unsupported document path".to_string());
+    }
+
+    let format = format_from_path(&path);
+    remember_recent_document(&app, &path, &format)?;
+    open_path(&path)
+}
+
+#[tauri::command]
 fn consume_startup_files(
     window: Window,
     startup: State<StartupFiles>,
@@ -803,6 +815,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            open_document_at_path,
             consume_startup_files,
             save_document,
             get_recent_documents,
