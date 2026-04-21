@@ -121,7 +121,7 @@ function normalizeOpenDocumentResults(results: OpenDocumentResult[] | null | und
 }
 
 function getMimeType(format: DocumentFormat): string {
-  return format === 'hwpx' ? 'application/x-hwpx' : 'application/x-hwp';
+  return format === 'hwpx' ? 'application/vnd.hancom.hwpx' : 'application/x-hwp';
 }
 
 function ensureExtension(fileName: string, format: DocumentFormat): string {

@@ -19,7 +19,8 @@ use winreg::{
 };
 
 const HWP_MIME: &str = "application/x-hwp";
-const HWPX_MIME: &str = "application/x-hwpx";
+const HWPX_MIME: &str = "application/vnd.hancom.hwpx";
+const HWPX_LEGACY_MIME: &str = "application/x-hwpx";
 
 #[derive(Default)]
 struct StartupFiles {
@@ -234,21 +235,36 @@ fn path_has_supported_document_extension(path: &Path) -> bool {
     )
 }
 
-fn resolve_document_path(arg: &OsStr, cwd: Option<&Path>) -> Option<PathBuf> {
-    let raw = PathBuf::from(arg);
-    let candidate = if raw.is_absolute() {
-        raw
+fn document_path_from_os_arg(arg: &OsStr, cwd: Option<&Path>) -> Option<PathBuf> {
+    if let Some(raw) = arg.to_str() {
+        if let Ok(url) = tauri::Url::parse(raw) {
+            if let Ok(path) = url.to_file_path() {
+                if path_has_supported_document_extension(&path) {
+                    return Some(path);
+                }
+                return None;
+            }
+        }
+    }
+
+    let path = PathBuf::from(arg);
+    let resolved = if path.is_absolute() {
+        path
     } else if let Some(base) = cwd {
-        base.join(raw)
+        base.join(path)
     } else {
-        raw
+        path
     };
 
-    if !path_has_supported_document_extension(&candidate) {
+    if !path_has_supported_document_extension(&resolved) {
         return None;
     }
 
-    Some(candidate)
+    Some(resolved)
+}
+
+fn resolve_document_path(arg: &OsStr, cwd: Option<&Path>) -> Option<PathBuf> {
+    document_path_from_os_arg(arg, cwd)
 }
 
 fn collect_startup_files_from_args<I, S>(args: I, cwd: Option<&Path>) -> Vec<OpenDocumentResult>
@@ -365,8 +381,10 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
     {
         let default_hwp = query_default_app(HWP_MIME)?;
         let default_hwpx = query_default_app(HWPX_MIME)?;
+        let default_hwpx_legacy = query_default_app(HWPX_LEGACY_MIME)?;
         let is_hwp_default = default_hwp.as_deref() == Some("rhwp.desktop");
-        let is_hwpx_default = default_hwpx.as_deref() == Some("rhwp.desktop");
+        let is_hwpx_default = default_hwpx.as_deref() == Some("rhwp.desktop")
+            || default_hwpx_legacy.as_deref() == Some("rhwp.desktop");
         let pending = pending_mime_types(is_hwp_default, is_hwpx_default);
         let is_default = pending.is_empty();
 
@@ -381,7 +399,7 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
             platform: "linux".to_string(),
             action_mode: "set-default".to_string(),
             default_app_hwp: default_hwp,
-            default_app_hwpx: default_hwpx,
+            default_app_hwpx: default_hwpx.or(default_hwpx_legacy),
             pending_mime_types: pending,
         });
     }
@@ -612,7 +630,7 @@ fn get_file_association_status() -> Result<FileAssociationStatus, String> {
 fn set_default_file_association() -> Result<FileAssociationStatus, String> {
     #[cfg(target_os = "linux")]
     {
-        for mime_type in [HWP_MIME, HWPX_MIME] {
+        for mime_type in [HWP_MIME, HWPX_MIME, HWPX_LEGACY_MIME] {
             let status = std::process::Command::new("xdg-mime")
                 .args(["default", "rhwp.desktop", mime_type])
                 .status()
@@ -798,4 +816,61 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running rhwp-desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn document_path_from_os_arg_accepts_supported_extensions() {
+        assert!(document_path_from_os_arg(OsStr::new("sample.hwp"), None).is_some());
+        assert!(document_path_from_os_arg(OsStr::new("sample.HWPX"), None).is_some());
+        assert!(document_path_from_os_arg(OsStr::new("sample.pdf"), None).is_none());
+    }
+
+    #[test]
+    fn document_path_from_os_arg_resolves_relative_paths_against_cwd() {
+        let cwd = std::env::temp_dir().join("rhwp-startup-arg");
+        let expected = cwd.join("docs").join("sample.hwp");
+
+        assert_eq!(
+            document_path_from_os_arg(OsStr::new("docs/sample.hwp"), Some(cwd.as_path())),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn document_path_from_os_arg_accepts_file_urls() {
+        let path = std::env::temp_dir().join("sample.hwpx");
+        let url = tauri::Url::from_file_path(&path).unwrap().to_string();
+
+        assert_eq!(
+            document_path_from_os_arg(OsStr::new(url.as_str()), Some(Path::new("/ignored"))),
+            Some(path)
+        );
+    }
+
+    #[test]
+    fn collect_startup_files_from_args_skips_unsupported_inputs() {
+        let dir = std::env::temp_dir().join(format!("rhwp-startup-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let supported = dir.join("opened.hwp");
+        let ignored = dir.join("ignored.txt");
+        fs::write(&supported, b"doc").unwrap();
+        fs::write(&ignored, b"ignore").unwrap();
+
+        let opened = collect_startup_files_from_args(
+            [supported.as_os_str(), ignored.as_os_str()],
+            Some(dir.as_path()),
+        );
+
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].file_name, "opened.hwp");
+
+        let _ = fs::remove_file(&supported);
+        let _ = fs::remove_file(&ignored);
+        let _ = fs::remove_dir(&dir);
+    }
 }

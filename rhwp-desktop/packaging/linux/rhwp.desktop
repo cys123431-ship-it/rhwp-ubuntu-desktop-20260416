@@ -5,6 +5,6 @@ Exec=rhwp %F
 Icon=rhwp
 Terminal=false
 Type=Application
-MimeType=application/x-hwp;application/x-hwpx;
+MimeType=application/x-hwp;application/vnd.hancom.hwpx;application/x-hwpx;
 Categories=Office;WordProcessor;
 StartupNotify=true
