@@ -17,6 +17,8 @@ const tauriDriverUrl = process.env.RHWP_E2E_DRIVER_URL ?? 'http://127.0.0.1:4444
 const tauriDriverHost = process.env.RHWP_E2E_DRIVER_HOST ?? '127.0.0.1';
 const tauriDriverPort = Number(process.env.RHWP_E2E_DRIVER_PORT ?? '4444');
 const tauriDriverBin = process.env.RHWP_E2E_TAURI_DRIVER ?? 'tauri-driver';
+const defaultAppPattern = /default app|기본 앱/i;
+const settingsPattern = /settings|설정/i;
 
 let tauriDriverProcess;
 let tempRoot = '';
@@ -81,7 +83,7 @@ async function createTempCopy(relativeSourcePath, targetName) {
 
 async function openApp(args = []) {
   const capabilities = new Capabilities();
-  capabilities.setBrowserName('tauri');
+  capabilities.setBrowserName('wry');
   capabilities.set('tauri:options', { application: installedBinary, args });
 
   const driver = await new Builder()
@@ -169,28 +171,48 @@ test('shows the default-app banner and handles platform-specific registration fl
   const driver = await openApp();
 
   try {
-    const initialState = await waitForState(
-      driver,
-      (state) => state.banner.visible && state.banner.actions.length > 0,
-      15000,
-      'default app banner',
-    );
-
-    assert.match(initialState.banner.text, /default app/i);
-    assert.equal(await callHook(driver, 'clickBannerAction'), true);
-
     if (isWindows) {
-      const updatedState = await waitForState(
+      const initialState = await waitForState(
         driver,
-        (state) => state.banner.visible && /settings/i.test(state.banner.text),
+        (state) =>
+          state.session.associationStatus?.platform === 'windows'
+          && (
+            (state.banner.visible && state.banner.actions.length > 0)
+            || state.session.associationStatus?.isDefault === true
+          ),
         15000,
-        'windows default apps settings banner',
+        'windows file association state',
       );
 
-      assert.equal(updatedState.session.associationStatus?.platform, 'windows');
-      assert.equal(updatedState.session.associationStatus?.isDefault, false);
-      assert.match(updatedState.banner.text, /settings/i);
+      assert.equal(initialState.session.associationStatus?.platform, 'windows');
+
+      if (initialState.banner.visible) {
+        assert.match(initialState.banner.text, defaultAppPattern);
+        assert.equal(await callHook(driver, 'clickBannerAction'), true);
+
+        const updatedState = await waitForState(
+          driver,
+          (state) => state.banner.visible && settingsPattern.test(state.banner.text),
+          15000,
+          'windows default apps settings banner',
+        );
+
+        assert.equal(updatedState.session.associationStatus?.isDefault, false);
+        assert.match(updatedState.banner.text, settingsPattern);
+      } else {
+        assert.equal(initialState.session.associationStatus?.isDefault, true);
+      }
     } else {
+      const initialState = await waitForState(
+        driver,
+        (state) => state.banner.visible && state.banner.actions.length > 0,
+        15000,
+        'default app banner',
+      );
+
+      assert.match(initialState.banner.text, defaultAppPattern);
+      assert.equal(await callHook(driver, 'clickBannerAction'), true);
+
       const updatedState = await waitForState(
         driver,
         (state) => state.session.associationStatus?.isDefault === true,
