@@ -157,7 +157,7 @@ jobs:
           cache-dependency-path: rhwp-desktop/package-lock.json
 
       - name: Download Windows installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: rhwp-windows-installers
           path: dist
@@ -242,7 +242,7 @@ jobs:
           cache-dependency-path: rhwp-desktop/package-lock.json
 
       - name: Download Windows installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: rhwp-windows-installers
           path: dist
@@ -324,7 +324,7 @@ jobs:
 
       - name: Download Windows installers
         if: steps.signing.outputs.publish == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: rhwp-windows-installers
           path: dist
