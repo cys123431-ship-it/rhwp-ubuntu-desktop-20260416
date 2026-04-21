@@ -283,7 +283,13 @@ jobs:
       - name: Verify file association command
         run: |
           test "$(xdg-mime query default application/x-hwp)" = "rhwp.desktop"
-          test "$(xdg-mime query default application/x-hwpx)" = "rhwp.desktop"
+          hwpx_primary="$(xdg-mime query default application/vnd.hancom.hwpx || true)"
+          hwpx_legacy="$(xdg-mime query default application/x-hwpx || true)"
+          if [ -n "$hwpx_primary" ]; then
+            test "$hwpx_primary" = "rhwp.desktop"
+          else
+            test "$hwpx_legacy" = "rhwp.desktop"
+          fi
 
       - name: Publish desktop E2E summary
         run: |
@@ -293,6 +299,7 @@ jobs:
             echo "- Installed package: \`rhwp\`"
             echo "- Display matrix target: \`${{ matrix.ubuntu-version }}\`"
             echo "- Verified: first-run default-app banner, HWPX startup open, recovery restore/delete, multi-window startup fan-out"
+            echo "- Verified HWPX default-app registration with primary MIME \`application/vnd.hancom.hwpx\` and legacy alias fallback"
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish-release:
