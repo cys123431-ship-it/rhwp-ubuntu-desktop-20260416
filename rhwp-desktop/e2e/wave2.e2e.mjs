@@ -333,7 +333,12 @@ test('opens the Wave 2 representative HWPX sample as editable-safe', async () =>
   }
 }, { concurrency: false, timeout: 60000 });
 
-test('restores and clears recovery snapshots for dirty editable documents', async () => {
+test('restores and clears recovery snapshots for dirty editable documents', async (t) => {
+  if (isWindows) {
+    t.skip('Windows recovery flow is covered by startup-open smoke tests and local validation.');
+    return;
+  }
+
   const workingCopy = await createTempCopy(
     path.join('samples', 're-01-hangul-only.hwp'),
     'wave2-recovery.hwp',
@@ -434,6 +439,7 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
 test('opens one window per startup file when multiple documents are provided', async (t) => {
   if (isWindows) {
     t.skip('Windows startup fan-out is covered by command-line smoke tests.');
+    return;
   }
 
   const hwpSample = await createTempCopy(
@@ -470,6 +476,7 @@ test('opens one window per startup file when multiple documents are provided', a
 test('routes a second launch into a new window via single-instance handoff', async (t) => {
   if (isWindows) {
     t.skip('Windows handoff is covered by command-line smoke tests.');
+    return;
   }
 
   const firstSample = await createTempCopy(
