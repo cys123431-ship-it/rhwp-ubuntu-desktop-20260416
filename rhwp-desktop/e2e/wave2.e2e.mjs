@@ -6,7 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, before, beforeEach, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Builder, Capabilities } from 'selenium-webdriver';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -121,7 +121,24 @@ async function createTempCopy(relativeSourcePath, targetName) {
 async function openApp(args = []) {
   const capabilities = new Capabilities();
   capabilities.setBrowserName('wry');
-  capabilities.set('tauri:options', { application: installedBinary, args });
+  const normalizedArgs = args.map((arg) => {
+    if (
+      !isWindows
+      || typeof arg !== 'string'
+      || arg.startsWith('file://')
+      || !path.isAbsolute(arg)
+    ) {
+      return arg;
+    }
+
+    const extension = path.extname(arg).toLowerCase();
+    if (extension !== '.hwp' && extension !== '.hwpx') {
+      return arg;
+    }
+
+    return pathToFileURL(arg).toString();
+  });
+  capabilities.set('tauri:options', { application: installedBinary, args: normalizedArgs });
 
   const driver = await new Builder()
     .usingServer(tauriDriverUrl)

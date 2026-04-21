@@ -440,14 +440,11 @@ fn query_default_app(mime_type: &str) -> Result<Option<String>, String> {
         .map_err(|err| err.to_string())?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stdout.is_empty()
-            && (stderr.is_empty()
-                || stderr.contains("No default application")
-                || stderr.contains("No application is registered"))
-        {
+        if stdout.is_empty() {
             return Ok(None);
         }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(stderr);
     }
 
