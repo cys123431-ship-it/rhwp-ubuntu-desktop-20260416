@@ -4,8 +4,9 @@
     <comment>Hangul Word Processor document</comment>
     <glob pattern="*.hwp"/>
   </mime-type>
-  <mime-type type="application/x-hwpx">
+  <mime-type type="application/vnd.hancom.hwpx">
     <comment>Hangul Word Processor XML document</comment>
     <glob pattern="*.hwpx"/>
+    <alias type="application/x-hwpx"/>
   </mime-type>
 </mime-info>

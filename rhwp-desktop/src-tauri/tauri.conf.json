@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "rhwp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "io.rhwp.desktop",
   "build": {
     "frontendDist": "../../rhwp-studio/dist"
@@ -22,6 +22,11 @@
   },
   "bundle": {
     "active": false,
+    "publisher": "rhwp contributors",
+    "shortDescription": "Open desktop editor for HWP and HWPX documents",
+    "longDescription": "rhwp opens, edits, and saves HWP/HWPX documents on Windows and Ubuntu.",
+    "category": "Productivity",
+    "copyright": "Copyright (c) 2026 rhwp contributors",
     "icon": [
       "../../assets/logo/logo-32.png",
       "../../assets/logo/logo-128.png",

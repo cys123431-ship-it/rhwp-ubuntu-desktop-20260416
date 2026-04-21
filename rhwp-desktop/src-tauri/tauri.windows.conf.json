@@ -15,12 +15,14 @@
         "ext": ["hwp"],
         "name": "HWP Document",
         "description": "Hangul Word Processor document",
+        "mimeType": "application/x-hwp",
         "role": "Editor"
       },
       {
         "ext": ["hwpx"],
         "name": "HWPX Document",
         "description": "Hangul Word Processor XML document",
+        "mimeType": "application/vnd.hancom.hwpx",
         "role": "Editor"
       }
     ],

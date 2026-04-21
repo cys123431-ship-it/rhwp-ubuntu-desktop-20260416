@@ -86,7 +86,7 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            Write-Host "Windows signing secrets are not configured. Release assets will be published without GitHub Actions signing."
+            Write-Host "Windows signing secrets are not configured. GitHub Actions will skip release asset publishing for Windows."
           }
 
       - name: Prepare Windows signing certificate
@@ -309,13 +309,28 @@ jobs:
       contents: write
 
     steps:
+      - name: Detect signing configuration
+        id: signing
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Skipping Windows release upload because signing secrets are not configured."
+            exit 0
+          }
+          "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Download Windows installers
+        if: steps.signing.outputs.publish == 'true'
         uses: actions/download-artifact@v4
         with:
           name: rhwp-windows-installers
           path: dist
 
       - name: Attach Windows installers to GitHub release
+        if: steps.signing.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -323,3 +338,8 @@ jobs:
             dist/**/*.exe.sha256
             dist/**/*.msi
             dist/**/*.msi.sha256
+
+      - name: Summarize local publishing fallback
+        if: steps.signing.outputs.publish != 'true'
+        run: |
+          Write-Host "Windows release assets must be uploaded from the locally signed bundle for this tag."
