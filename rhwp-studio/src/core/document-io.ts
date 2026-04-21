@@ -69,6 +69,7 @@ export interface WriteRecoverySnapshotRequest {
 
 export interface RhwpDesktopBridge {
   openDocument?: () => Promise<OpenDocumentResult | null>;
+  openDocumentAtPath?: (path: string) => Promise<OpenDocumentResult>;
   consumeStartupFiles?: () => Promise<OpenDocumentResult[]>;
   saveDocument: (request: SaveDocumentRequest) => Promise<SaveDocumentResult | null>;
   getRecentDocuments?: () => Promise<RecentDocument[]>;
@@ -85,6 +86,7 @@ export interface RhwpDesktopBridge {
 export interface DocumentIO {
   readonly kind: 'web' | 'desktop';
   openWithPicker(): Promise<OpenDocumentResult | null>;
+  openAtPath(path: string): Promise<OpenDocumentResult | null>;
   consumeStartupFiles(): Promise<OpenDocumentResult[]>;
   saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null>;
   getRecentDocuments(): Promise<RecentDocument[]>;
@@ -157,6 +159,10 @@ class WebDocumentIO implements DocumentIO {
 
   async consumeStartupFiles(): Promise<OpenDocumentResult[]> {
     return [];
+  }
+
+  async openAtPath(_path: string): Promise<OpenDocumentResult | null> {
+    return null;
   }
 
   async saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null> {
@@ -284,6 +290,14 @@ class DesktopDocumentIO implements DocumentIO {
     return [];
   }
 
+  async openAtPath(path: string): Promise<OpenDocumentResult | null> {
+    if (!this.bridge.openDocumentAtPath) {
+      return null;
+    }
+
+    return normalizeOpenDocumentResult(await this.bridge.openDocumentAtPath(path));
+  }
+
   async saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null> {
     return this.bridge.saveDocument(request);
   }
@@ -375,6 +389,7 @@ function createTauriBridge(): RhwpDesktopBridge | null {
 
   return {
     openDocument: () => invoke<OpenDocumentResult | null>('open_document'),
+    openDocumentAtPath: (path) => invoke<OpenDocumentResult>('open_document_at_path', { path }),
     consumeStartupFiles: () => invoke<OpenDocumentResult[]>('consume_startup_files'),
     saveDocument: (request) => invoke<SaveDocumentResult | null>('save_document', { request }),
     getRecentDocuments: () => invoke<RecentDocument[]>('get_recent_documents'),
@@ -406,6 +421,9 @@ export function createDocumentIO(): DocumentIO {
     },
     async consumeStartupFiles() {
       return (createActiveDesktopDocumentIO() ?? webDocumentIO).consumeStartupFiles();
+    },
+    async openAtPath(path) {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).openAtPath(path);
     },
     async saveDocument(request) {
       return (createActiveDesktopDocumentIO() ?? webDocumentIO).saveDocument(request);

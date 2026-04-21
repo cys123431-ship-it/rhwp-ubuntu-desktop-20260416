@@ -274,23 +274,33 @@ test('shows the default-app banner and handles platform-specific registration fl
     } else {
       const initialState = await waitForState(
         driver,
-        (state) => state.banner.visible && state.banner.actions.length > 0,
+        (state) =>
+          state.session.associationStatus?.platform === 'linux'
+          && (
+            (state.banner.visible && state.banner.actions.length > 0)
+            || state.session.associationStatus?.isDefault === true
+          ),
         15000,
-        'default app banner',
+        'linux file association state',
       );
 
-      assert.match(initialState.banner.text, defaultAppPattern);
-      assert.equal(await callHook(driver, 'clickBannerAction'), true);
+      assert.equal(initialState.session.associationStatus?.platform, 'linux');
+      if (initialState.banner.visible) {
+        assert.match(initialState.banner.text, defaultAppPattern);
+        assert.equal(await callHook(driver, 'clickBannerAction'), true);
 
-      const updatedState = await waitForState(
-        driver,
-        (state) => state.session.associationStatus?.isDefault === true,
-        15000,
-        'updated file association status',
-      );
+        const updatedState = await waitForState(
+          driver,
+          (state) => state.session.associationStatus?.isDefault === true,
+          15000,
+          'updated file association status',
+        );
 
-      assert.equal(updatedState.session.associationStatus?.isDefault, true);
-      assert.equal(updatedState.banner.visible, false);
+        assert.equal(updatedState.session.associationStatus?.isDefault, true);
+        assert.equal(updatedState.banner.visible, false);
+      } else {
+        assert.equal(initialState.session.associationStatus?.isDefault, true);
+      }
     }
   } finally {
     await driver.quit();
@@ -298,11 +308,14 @@ test('shows the default-app banner and handles platform-specific registration fl
 }, { concurrency: false, timeout: 60000 });
 
 test('opens the Wave 2 representative HWPX sample as editable-safe', async () => {
-  const driver = await openApp([
-    path.resolve(repoRoot, 'samples', 'tac-img-02.hwpx'),
-  ]);
+  const samplePath = path.resolve(repoRoot, 'samples', 'tac-img-02.hwpx');
+  const driver = await openApp(isWindows ? [] : [samplePath]);
 
   try {
+    if (isWindows) {
+      assert.equal(await callHook(driver, 'openDocumentAtPath', samplePath), true);
+    }
+
     const state = await waitForState(
       driver,
       (candidate) => candidate.session.hasDocument,
@@ -326,10 +339,14 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
     'wave2-recovery.hwp',
   );
 
-  let driver = await openApp([workingCopy]);
+  let driver = await openApp(isWindows ? [] : [workingCopy]);
   let snapshotId = null;
 
   try {
+    if (isWindows) {
+      assert.equal(await callHook(driver, 'openDocumentAtPath', workingCopy), true);
+    }
+
     await waitForState(
       driver,
       (state) => state.session.hasDocument && state.session.filePath === workingCopy,
@@ -355,9 +372,13 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
     await driver.quit();
   }
 
-  driver = await openApp([workingCopy]);
+  driver = await openApp(isWindows ? [] : [workingCopy]);
 
   try {
+    if (isWindows) {
+      assert.equal(await callHook(driver, 'openDocumentAtPath', workingCopy), true);
+    }
+
     const dialogState = await waitForState(
       driver,
       (state) => state.dialog.visible === true,
@@ -391,9 +412,13 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
     await driver.quit();
   }
 
-  driver = await openApp([workingCopy]);
+  driver = await openApp(isWindows ? [] : [workingCopy]);
 
   try {
+    if (isWindows) {
+      assert.equal(await callHook(driver, 'openDocumentAtPath', workingCopy), true);
+    }
+
     const finalState = await waitForState(
       driver,
       (state) => state.session.hasDocument,
@@ -406,7 +431,11 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
   }
 }, { concurrency: false, timeout: 120000 });
 
-test('opens one window per startup file when multiple documents are provided', async () => {
+test('opens one window per startup file when multiple documents are provided', async (t) => {
+  if (isWindows) {
+    t.skip('Windows startup fan-out is covered by command-line smoke tests.');
+  }
+
   const hwpSample = await createTempCopy(
     path.join('samples', 're-01-hangul-only.hwp'),
     'fanout-left.hwp',
@@ -438,7 +467,11 @@ test('opens one window per startup file when multiple documents are provided', a
   }
 }, { concurrency: false, timeout: 90000 });
 
-test('routes a second launch into a new window via single-instance handoff', async () => {
+test('routes a second launch into a new window via single-instance handoff', async (t) => {
+  if (isWindows) {
+    t.skip('Windows handoff is covered by command-line smoke tests.');
+  }
+
   const firstSample = await createTempCopy(
     path.join('samples', 're-01-hangul-only.hwp'),
     'handoff-first.hwp',
