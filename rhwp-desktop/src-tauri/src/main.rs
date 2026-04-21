@@ -20,6 +20,7 @@ use winreg::{
 
 const HWP_MIME: &str = "application/x-hwp";
 const HWPX_MIME: &str = "application/vnd.hancom.hwpx";
+#[cfg(target_os = "linux")]
 const HWPX_LEGACY_MIME: &str = "application/x-hwpx";
 
 #[derive(Default)]
