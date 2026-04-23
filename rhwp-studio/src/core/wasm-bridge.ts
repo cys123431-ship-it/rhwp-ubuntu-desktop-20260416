@@ -144,6 +144,17 @@ export class WasmBridge {
     return (this.ensureDocument() as any).exportHwpx();
   }
 
+  exportDocx(): Uint8Array {
+    const doc = this.ensureDocument() as any;
+    if (typeof doc.exportDocx === 'function') {
+      return doc.exportDocx();
+    }
+    if (typeof doc.save === 'function') {
+      return doc.save('docx');
+    }
+    throw new Error('DOCX 저장을 지원하지 않는 WASM 번들입니다.');
+  }
+
   save(format: DocumentFormat): Uint8Array {
     return (this.ensureDocument() as any).save(format);
   }
@@ -292,6 +303,11 @@ export class WasmBridge {
   getParagraphCount(sec: number): number {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
     return this.doc.getParagraphCount(sec);
+  }
+
+  getSectionCount(): number {
+    if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
+    return (this.doc as any).getSectionCount();
   }
 
   /** 문단에 텍스트박스 Shape 컨트롤이 있으면 control_index, 없으면 -1 */

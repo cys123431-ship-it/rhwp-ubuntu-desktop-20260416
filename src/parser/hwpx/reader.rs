@@ -105,7 +105,8 @@ impl HwpxPackageSnapshot {
                 (HwpxPackageEntryRole::ContentHpf, true)
             } else if path == "Contents/header.xml" {
                 (HwpxPackageEntryRole::HeaderXml, true)
-            } else if let Some(section_idx) = section_paths.iter().position(|entry| entry == &path) {
+            } else if let Some(section_idx) = section_paths.iter().position(|entry| entry == &path)
+            {
                 (HwpxPackageEntryRole::Section(section_idx), true)
             } else if let Some(bin_idx) = bindata_paths.iter().position(|entry| entry == &path) {
                 (HwpxPackageEntryRole::BinData(bin_idx), true)
@@ -167,27 +168,26 @@ impl HwpxReader {
     ///
     /// 엔트리 압축 해제 크기는 [`MAX_XML_SIZE`]로 제한된다.
     pub fn read_file(&mut self, path: &str) -> Result<String, HwpxError> {
-        let mut file = self.archive.by_name(path).map_err(|e| {
-            HwpxError::MissingFile(format!("{}: {}", path, e))
-        })?;
-        let bytes = read_limited(&mut file, MAX_XML_SIZE).map_err(|e| {
-            HwpxError::ZipError(format!("{} 읽기 실패: {}", path, e))
-        })?;
-        String::from_utf8(bytes).map_err(|e| {
-            HwpxError::ZipError(format!("{} UTF-8 변환 실패: {}", path, e))
-        })
+        let mut file = self
+            .archive
+            .by_name(path)
+            .map_err(|e| HwpxError::MissingFile(format!("{}: {}", path, e)))?;
+        let bytes = read_limited(&mut file, MAX_XML_SIZE)
+            .map_err(|e| HwpxError::ZipError(format!("{} 읽기 실패: {}", path, e)))?;
+        String::from_utf8(bytes)
+            .map_err(|e| HwpxError::ZipError(format!("{} UTF-8 변환 실패: {}", path, e)))
     }
 
     /// 지정한 경로의 파일을 바이트 배열로 읽는다.
     ///
     /// 엔트리 압축 해제 크기는 [`MAX_BINDATA_SIZE`]로 제한된다.
     pub fn read_file_bytes(&mut self, path: &str) -> Result<Vec<u8>, HwpxError> {
-        let mut file = self.archive.by_name(path).map_err(|e| {
-            HwpxError::MissingFile(format!("{}: {}", path, e))
-        })?;
-        read_limited(&mut file, MAX_BINDATA_SIZE).map_err(|e| {
-            HwpxError::ZipError(format!("{} 읽기 실패: {}", path, e))
-        })
+        let mut file = self
+            .archive
+            .by_name(path)
+            .map_err(|e| HwpxError::MissingFile(format!("{}: {}", path, e)))?;
+        read_limited(&mut file, MAX_BINDATA_SIZE)
+            .map_err(|e| HwpxError::ZipError(format!("{} 읽기 실패: {}", path, e)))
     }
 
     /// 아카이브 내 파일 목록을 반환한다.
@@ -215,8 +215,8 @@ mod tests {
         let mut out = Cursor::new(Vec::<u8>::new());
         {
             let mut zip = ZipWriter::new(&mut out);
-            let options = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let options =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             zip.start_file("Contents/content.hpf", options).unwrap();
             zip.write_all(br#"<?xml version="1.0"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf/"><opf:manifest><opf:item id="header" href="Contents/header.xml" media-type="application/xml"/><opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/><opf:item id="image1" href="BinData/custom.bin" media-type="application/octet-stream"/></opf:manifest><opf:spine><opf:itemref idref="section0"/></opf:spine></opf:package>"#).unwrap();
             zip.start_file("Contents/header.xml", options).unwrap();
@@ -231,14 +231,24 @@ mod tests {
         }
 
         let snapshot = HwpxPackageSnapshot::from_bytes(&out.into_inner()).unwrap();
-        assert_eq!(snapshot.section_paths(), vec!["Contents/section0.xml".to_string()]);
-        assert_eq!(snapshot.bindata_paths(), vec!["BinData/custom.bin".to_string()]);
+        assert_eq!(
+            snapshot.section_paths(),
+            vec!["Contents/section0.xml".to_string()]
+        );
+        assert_eq!(
+            snapshot.bindata_paths(),
+            vec!["BinData/custom.bin".to_string()]
+        );
         assert!(matches!(
-            snapshot.entry("Contents/header.xml").map(|entry| &entry.role),
+            snapshot
+                .entry("Contents/header.xml")
+                .map(|entry| &entry.role),
             Some(HwpxPackageEntryRole::HeaderXml)
         ));
         assert!(matches!(
-            snapshot.entry("META-INF/manifest.xml").map(|entry| &entry.role),
+            snapshot
+                .entry("META-INF/manifest.xml")
+                .map(|entry| &entry.role),
             Some(HwpxPackageEntryRole::Other)
         ));
     }
@@ -284,8 +294,8 @@ mod tests {
         let mut out = Cursor::new(Vec::<u8>::new());
         {
             let mut zip = ZipWriter::new(&mut out);
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
             zip.start_file("Contents/bomb.xml", opts).unwrap();
             // 상한 + 1 바이트짜리 반복 패턴 — 매우 높은 압축률
             let payload = vec![b'A'; MAX_XML_SIZE + 1];
@@ -294,7 +304,11 @@ mod tests {
         }
         let bytes = out.into_inner();
         // 압축본은 실제로 수십 KB에 불과
-        assert!(bytes.len() < 1024 * 1024, "bomb compressed too large: {}", bytes.len());
+        assert!(
+            bytes.len() < 1024 * 1024,
+            "bomb compressed too large: {}",
+            bytes.len()
+        );
 
         let mut reader = HwpxReader::open(&bytes).unwrap();
         let result = reader.read_file("Contents/bomb.xml");

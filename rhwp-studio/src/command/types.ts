@@ -26,6 +26,9 @@ export interface EditorContext {
   isEditable: boolean;
   isProtected: boolean;
   canSave: boolean;
+  isDesktopApp: boolean;
+  canExportPdf: boolean;
+  canExportAllPagesJpg: boolean;
   saveFormat: DocumentFormat;
   /** Undo 가능한가? */
   canUndo: boolean;
@@ -68,4 +71,6 @@ export interface CommandServices {
   getInputHandler: () => InputHandler | null;
   /** ViewportManager 접근 (문서 미로드 시 null) */
   getViewportManager: () => ViewportManager | null;
+  /** 현재 보이는 페이지 인덱스 */
+  getCurrentPageIndex: () => number;
 }

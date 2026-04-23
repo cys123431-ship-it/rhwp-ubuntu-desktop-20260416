@@ -1,7 +1,9 @@
 import { showSaveAs } from '@/ui/save-as-dialog';
 import type {
   DocumentFormat,
+  ExportTargetFormat,
   FileAssociationStatus,
+  JpgExportScope,
   RecentDocument,
   RecoverySnapshotMeta,
   RecoverySnapshotPayload,
@@ -59,6 +61,27 @@ export interface SaveDocumentResult {
   format: DocumentFormat;
 }
 
+export interface SaveBinaryRequest {
+  suggestedName: string;
+  filePath?: string;
+  format: ExportTargetFormat;
+  mimeType: string;
+  bytes: Uint8Array;
+}
+
+export interface SaveBinaryResult {
+  fileName: string;
+  filePath?: string;
+  format: ExportTargetFormat;
+}
+
+export interface ExportDocumentRequest {
+  format: ExportTargetFormat;
+  fileName: string;
+  filePath?: string;
+  jpgScope?: JpgExportScope;
+}
+
 export interface WriteRecoverySnapshotRequest {
   snapshotId?: string;
   fileName: string;
@@ -72,6 +95,9 @@ export interface RhwpDesktopBridge {
   openDocumentAtPath?: (path: string) => Promise<OpenDocumentResult>;
   consumeStartupFiles?: () => Promise<OpenDocumentResult[]>;
   saveDocument: (request: SaveDocumentRequest) => Promise<SaveDocumentResult | null>;
+  saveBinaryFile?: (request: SaveBinaryRequest) => Promise<SaveBinaryResult | null>;
+  pickExportDirectory?: () => Promise<string | null>;
+  exportPdfFromSvgs?: (svgs: string[]) => Promise<Uint8Array>;
   getRecentDocuments?: () => Promise<RecentDocument[]>;
   getFileAssociationStatus?: () => Promise<FileAssociationStatus>;
   setDefaultFileAssociation?: () => Promise<FileAssociationStatus>;
@@ -89,6 +115,9 @@ export interface DocumentIO {
   openAtPath(path: string): Promise<OpenDocumentResult | null>;
   consumeStartupFiles(): Promise<OpenDocumentResult[]>;
   saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null>;
+  saveBinaryFile(request: SaveBinaryRequest): Promise<SaveBinaryResult | null>;
+  pickExportDirectory(): Promise<string | null>;
+  exportPdfFromSvgs(svgs: string[]): Promise<Uint8Array | null>;
   getRecentDocuments(): Promise<RecentDocument[]>;
   rememberRecentDocument(doc: RecentDocument): Promise<void>;
   getFileAssociationStatus(): Promise<FileAssociationStatus | null>;
@@ -124,6 +153,46 @@ function normalizeOpenDocumentResults(results: OpenDocumentResult[] | null | und
 
 function getMimeType(format: DocumentFormat): string {
   return format === 'hwpx' ? 'application/vnd.hancom.hwpx' : 'application/x-hwp';
+}
+
+function getBinaryExtension(format: ExportTargetFormat): string {
+  switch (format) {
+    case 'hwpx':
+      return '.hwpx';
+    case 'pdf':
+      return '.pdf';
+    case 'docx':
+      return '.docx';
+    case 'jpg':
+      return '.jpg';
+    case 'hwp':
+    default:
+      return '.hwp';
+  }
+}
+
+function getBinaryMimeType(format: ExportTargetFormat): string {
+  switch (format) {
+    case 'hwpx':
+      return 'application/vnd.hancom.hwpx';
+    case 'pdf':
+      return 'application/pdf';
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'jpg':
+      return 'image/jpeg';
+    case 'hwp':
+    default:
+      return 'application/x-hwp';
+  }
+}
+
+function normalizeBinaryName(fileName: string, format: ExportTargetFormat): string {
+  const targetExt = getBinaryExtension(format);
+  if (fileName.toLowerCase().endsWith(targetExt)) {
+    return fileName;
+  }
+  return fileName.replace(/\.(hwp|hwpx|pdf|docx|jpg|jpeg)$/i, '') + targetExt;
 }
 
 function ensureExtension(fileName: string, format: DocumentFormat): string {
@@ -223,6 +292,59 @@ class WebDocumentIO implements DocumentIO {
     };
   }
 
+  async saveBinaryFile(request: SaveBinaryRequest): Promise<SaveBinaryResult | null> {
+    const fileName = normalizeBinaryName(request.suggestedName, request.format);
+    const blob = new Blob([request.bytes as unknown as BlobPart], {
+      type: request.mimeType || getBinaryMimeType(request.format),
+    });
+
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{
+            description: `${request.format.toUpperCase()} file`,
+            accept: {
+              [request.mimeType || getBinaryMimeType(request.format)]: [getBinaryExtension(request.format)],
+            },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return {
+          fileName: handle.name,
+          format: request.format,
+        };
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return null;
+        }
+        console.warn('[DocumentIO] binary save picker fallback:', error);
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    return {
+      fileName,
+      format: request.format,
+    };
+  }
+
+  async pickExportDirectory(): Promise<string | null> {
+    return null;
+  }
+
+  async exportPdfFromSvgs(_svgs: string[]): Promise<Uint8Array | null> {
+    return null;
+  }
+
   async getRecentDocuments(): Promise<RecentDocument[]> {
     return loadRecentDocuments();
   }
@@ -300,6 +422,28 @@ class DesktopDocumentIO implements DocumentIO {
 
   async saveDocument(request: SaveDocumentRequest): Promise<SaveDocumentResult | null> {
     return this.bridge.saveDocument(request);
+  }
+
+  async saveBinaryFile(request: SaveBinaryRequest): Promise<SaveBinaryResult | null> {
+    if (!this.bridge.saveBinaryFile) {
+      return null;
+    }
+    return this.bridge.saveBinaryFile(request);
+  }
+
+  async pickExportDirectory(): Promise<string | null> {
+    if (!this.bridge.pickExportDirectory) {
+      return null;
+    }
+    return this.bridge.pickExportDirectory();
+  }
+
+  async exportPdfFromSvgs(svgs: string[]): Promise<Uint8Array | null> {
+    if (!this.bridge.exportPdfFromSvgs) {
+      return null;
+    }
+    const bytes = await this.bridge.exportPdfFromSvgs(svgs);
+    return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   }
 
   async getRecentDocuments(): Promise<RecentDocument[]> {
@@ -392,6 +536,9 @@ function createTauriBridge(): RhwpDesktopBridge | null {
     openDocumentAtPath: (path) => invoke<OpenDocumentResult>('open_document_at_path', { path }),
     consumeStartupFiles: () => invoke<OpenDocumentResult[]>('consume_startup_files'),
     saveDocument: (request) => invoke<SaveDocumentResult | null>('save_document', { request }),
+    saveBinaryFile: (request) => invoke<SaveBinaryResult | null>('save_binary_file', { request }),
+    pickExportDirectory: () => invoke<string | null>('pick_export_directory'),
+    exportPdfFromSvgs: (svgs) => invoke<Uint8Array>('export_pdf_from_svgs', { svgs }),
     getRecentDocuments: () => invoke<RecentDocument[]>('get_recent_documents'),
     getFileAssociationStatus: () => invoke<FileAssociationStatus>('get_file_association_status'),
     setDefaultFileAssociation: () => invoke<FileAssociationStatus>('set_default_file_association'),
@@ -427,6 +574,15 @@ export function createDocumentIO(): DocumentIO {
     },
     async saveDocument(request) {
       return (createActiveDesktopDocumentIO() ?? webDocumentIO).saveDocument(request);
+    },
+    async saveBinaryFile(request) {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).saveBinaryFile(request);
+    },
+    async pickExportDirectory() {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).pickExportDirectory();
+    },
+    async exportPdfFromSvgs(svgs) {
+      return (createActiveDesktopDocumentIO() ?? webDocumentIO).exportPdfFromSvgs(svgs);
     },
     async getRecentDocuments() {
       return (createActiveDesktopDocumentIO() ?? webDocumentIO).getRecentDocuments();

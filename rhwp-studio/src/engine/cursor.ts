@@ -493,6 +493,28 @@ export class CursorState {
   // ─── 셀 탐색 (Tab/Shift+Tab) ──────────────────────────
 
   /** 읽기 순서(row → col)로 정렬된 cellIdx 배열을 반환한다 */
+  moveToTrueDocumentEnd(): void {
+    this.preferredX = null;
+    try {
+      const sectionCount = this.wasm.getSectionCount();
+      for (let sec = Math.max(0, sectionCount - 1); sec >= 0; sec -= 1) {
+        const paraCount = this.wasm.getParagraphCount(sec);
+        if (paraCount <= 0) continue;
+
+        const lastPara = paraCount - 1;
+        const paraLen = this.wasm.getParagraphLength(sec, lastPara);
+        this.position = { sectionIndex: sec, paragraphIndex: lastPara, charOffset: paraLen };
+        this.updateRect();
+        return;
+      }
+
+      this.position = { sectionIndex: 0, paragraphIndex: 0, charOffset: 0 };
+      this.updateRect();
+    } catch (e) {
+      console.warn('[CursorState] moveToTrueDocumentEnd 실패:', e);
+    }
+  }
+
   private getCellReadingOrder(): number[] {
     const pos = this.position;
     const { sectionIndex: sec, parentParaIndex: ppi, controlIndex: ci, cellPath } = pos;

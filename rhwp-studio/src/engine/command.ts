@@ -267,6 +267,74 @@ export class SplitParagraphCommand implements EditCommand {
 
 // ─── 문단 병합 명령 (문단 시작에서 Backspace) ─────────
 
+export class InsertPageBreakCommand implements EditCommand {
+  readonly type = 'insertPageBreak';
+  readonly timestamp = Date.now();
+
+  private insertedParaIdx: number;
+  private insertedCharOffset = 0;
+
+  constructor(private position: DocumentPosition) {
+    this.insertedParaIdx = position.paragraphIndex + 1;
+  }
+
+  execute(wasm: WasmBridge): DocumentPosition {
+    const { sectionIndex: sec, paragraphIndex: para, charOffset } = this.position;
+    const result = JSON.parse(wasm.insertPageBreak(sec, para, charOffset));
+    if (result.ok) {
+      this.insertedParaIdx = result.paraIdx ?? (para + 1);
+      this.insertedCharOffset = result.charOffset ?? 0;
+      return {
+        sectionIndex: sec,
+        paragraphIndex: this.insertedParaIdx,
+        charOffset: this.insertedCharOffset,
+      };
+    }
+    return { ...this.position };
+  }
+
+  undo(wasm: WasmBridge): DocumentPosition {
+    wasm.mergeParagraph(this.position.sectionIndex, this.insertedParaIdx);
+    return { ...this.position };
+  }
+
+  mergeWith(): null { return null; }
+}
+
+export class InsertColumnBreakCommand implements EditCommand {
+  readonly type = 'insertColumnBreak';
+  readonly timestamp = Date.now();
+
+  private insertedParaIdx: number;
+  private insertedCharOffset = 0;
+
+  constructor(private position: DocumentPosition) {
+    this.insertedParaIdx = position.paragraphIndex + 1;
+  }
+
+  execute(wasm: WasmBridge): DocumentPosition {
+    const { sectionIndex: sec, paragraphIndex: para, charOffset } = this.position;
+    const result = JSON.parse(wasm.insertColumnBreak(sec, para, charOffset));
+    if (result.ok) {
+      this.insertedParaIdx = result.paraIdx ?? (para + 1);
+      this.insertedCharOffset = result.charOffset ?? 0;
+      return {
+        sectionIndex: sec,
+        paragraphIndex: this.insertedParaIdx,
+        charOffset: this.insertedCharOffset,
+      };
+    }
+    return { ...this.position };
+  }
+
+  undo(wasm: WasmBridge): DocumentPosition {
+    wasm.mergeParagraph(this.position.sectionIndex, this.insertedParaIdx);
+    return { ...this.position };
+  }
+
+  mergeWith(): null { return null; }
+}
+
 export class MergeParagraphCommand implements EditCommand {
   readonly type = 'mergeParagraph';
   readonly timestamp = Date.now();

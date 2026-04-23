@@ -3,7 +3,6 @@ import { FieldEditDialog } from '@/ui/field-edit-dialog';
 import { FindDialog } from '@/ui/find-dialog';
 import { GotoDialog } from '@/ui/goto-dialog';
 
-/** 검색 대화상자 싱글톤 — 열려 있으면 재사용 */
 let findDialogInstance: FindDialog | null = null;
 
 export const editCommands: CommandDef[] = [
@@ -32,7 +31,8 @@ export const editCommands: CommandDef[] = [
     label: '오려 두기',
     icon: 'icon-cut',
     shortcutLabel: 'Ctrl+X',
-    canExecute: (ctx) => ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
+    canExecute: (ctx) =>
+      ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
     execute(services) {
       services.getInputHandler()?.performCut();
     },
@@ -42,7 +42,8 @@ export const editCommands: CommandDef[] = [
     label: '복사하기',
     icon: 'icon-copy',
     shortcutLabel: 'Ctrl+C',
-    canExecute: (ctx) => ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
+    canExecute: (ctx) =>
+      ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
     execute(services) {
       services.getInputHandler()?.performCopy();
     },
@@ -53,8 +54,8 @@ export const editCommands: CommandDef[] = [
     icon: 'icon-paste',
     shortcutLabel: 'Ctrl+V',
     canExecute: (ctx) => ctx.hasDocument,
-    execute() {
-      document.execCommand('paste');
+    execute(services) {
+      services.getInputHandler()?.performPaste();
     },
   },
   {
@@ -62,16 +63,20 @@ export const editCommands: CommandDef[] = [
     label: '모양 복사',
     icon: 'icon-format-copy',
     shortcutLabel: 'Ctrl+Alt+C',
-    canExecute: () => false, // 미구현
-    execute() { /* TODO */ },
+    canExecute: () => false,
+    execute() {
+      // TODO
+    },
   },
   {
     id: 'edit:delete',
     label: '지우기',
     icon: 'icon-delete',
     shortcutLabel: 'Ctrl+E',
-    canExecute: () => false, // 미구현
-    execute() { /* TODO */ },
+    canExecute: (ctx) => ctx.hasDocument && ctx.isEditable,
+    execute(services) {
+      services.getInputHandler()?.performDelete();
+    },
   },
   {
     id: 'edit:select-all',
@@ -123,13 +128,16 @@ export const editCommands: CommandDef[] = [
       if (findDialogInstance && findDialogInstance.isOpen()) {
         findDialogInstance.findNext();
       } else if (FindDialog.lastQuery) {
-        // 대화상자 없이 WASM 직접 검색
         const ih = services.getInputHandler();
         if (!ih) return;
         const pos = ih.getCursorPosition();
         const result = services.wasm.searchText(
-          FindDialog.lastQuery, pos.sectionIndex, pos.paragraphIndex,
-          pos.charOffset, true, FindDialog.lastCaseSensitive,
+          FindDialog.lastQuery,
+          pos.sectionIndex,
+          pos.paragraphIndex,
+          pos.charOffset,
+          true,
+          FindDialog.lastCaseSensitive,
         );
         if (result.found) {
           ih.moveCursorTo({
@@ -170,19 +178,20 @@ export const editCommands: CommandDef[] = [
       const ih = services.getInputHandler();
       if (!ih) return;
       const fi = (ih as any).getFieldInfo?.();
-      console.log('[field:edit] fieldInfo:', fi);
       if (!fi || fi.fieldId == null) return;
+
       const props = services.wasm.getClickHereProps(fi.fieldId);
-      console.log('[field:edit] props:', props);
       if (!props.ok) return;
 
       const dialog = new FieldEditDialog();
       dialog.onApply = (newProps) => {
-        console.log('[field:edit] apply:', newProps);
         const result = services.wasm.updateClickHereProps(
-          fi.fieldId, newProps.guide, newProps.memo, newProps.name, newProps.editable,
+          fi.fieldId,
+          newProps.guide,
+          newProps.memo,
+          newProps.name,
+          newProps.editable,
         );
-        console.log('[field:edit] updateResult:', result);
         if (result.ok) {
           services.eventBus.emit('document-changed');
         }

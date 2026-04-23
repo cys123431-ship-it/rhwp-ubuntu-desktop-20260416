@@ -5,13 +5,20 @@ import { CaretRenderer } from './caret-renderer';
 import { FieldMarkerRenderer } from './field-marker-renderer';
 import { SelectionRenderer } from './selection-renderer';
 import { CommandHistory } from './history';
-import { DeleteSelectionCommand, ApplyCharFormatCommand, SnapshotCommand } from './command';
+import {
+  DeleteSelectionCommand,
+  ApplyCharFormatCommand,
+  InsertTextCommand,
+  InsertPageBreakCommand,
+  InsertColumnBreakCommand,
+  SplitParagraphCommand,
+  SnapshotCommand,
+} from './command';
 import type { OperationDescriptor } from './command';
 import { VirtualScroll } from '@/view/virtual-scroll';
 import { ViewportManager } from '@/view/viewport-manager';
 import type { DocumentPosition, CharProperties, ParaProperties, CursorRect, FormObjectHitResult } from '@/core/types';
 import type { CommandDispatcher } from '@/command/dispatcher';
-import { matchShortcut, defaultShortcuts } from '@/command/shortcut-map';
 import type { ContextMenu, ContextMenuItem } from '@/ui/context-menu';
 import type { CommandPalette } from '@/ui/command-palette';
 import type { CellSelectionRenderer } from './cell-selection-renderer';
@@ -34,6 +41,8 @@ export class InputHandler {
   private textarea: HTMLTextAreaElement;
   private active = false;
   private insertMode = true;  // true=삽입, false=수정(덮어쓰기)
+  private lastFormatSelection: { start: DocumentPosition; end: DocumentPosition } | null = null;
+  private lastFormatSelectionAt = 0;
   /** 마지막 셀 키 (눈금자 셀 bbox 중복 조회 방지) */
   private lastCellKey: string | null = null;
   private dispatcher: CommandDispatcher | null = null;
@@ -358,9 +367,8 @@ export class InputHandler {
     // Toolbar에서 서식 적용 요청 수신 (글꼴명, 크기, 색상 — 커맨드 시스템 미경유)
     eventBus.on('format-char', (props) => {
       if (!this.active) return;
-      if (this.cursor.hasSelection()) {
-        this.applyCharFormat(props as Partial<CharProperties>);
-      }
+      const applied = this.applyCharFormatFromToolbar(props as Partial<CharProperties>);
+      if (!applied) this.emitCursorFormatState();
       // 서식바 조작으로 빠진 포커스를 항상 복원
       this.focusTextarea();
     });
@@ -1073,11 +1081,56 @@ export class InputHandler {
   // ─── 서식 적용 ─────────────────────────────────────────
 
   /** 선택 범위에 글자 서식을 적용한다 */
-  private applyCharFormat(props: Partial<CharProperties>): void {
+  private applyCharFormat(props: Partial<CharProperties>): boolean {
     const sel = this.cursor.getSelectionOrdered();
-    if (!sel) return;
+    if (!sel) return false;
     const cmd = new ApplyCharFormatCommand(sel.start, sel.end, props);
     this.executeOperation({ kind: 'command', command: cmd });
+    return true;
+  }
+
+  private clonePosition(pos: DocumentPosition): DocumentPosition {
+    return {
+      ...pos,
+      cellPath: pos.cellPath?.map((entry) => ({ ...entry })),
+    };
+  }
+
+  private cloneSelection(selection: { start: DocumentPosition; end: DocumentPosition }): { start: DocumentPosition; end: DocumentPosition } {
+    return {
+      start: this.clonePosition(selection.start),
+      end: this.clonePosition(selection.end),
+    };
+  }
+
+  private rememberFormatSelection(selection: { start: DocumentPosition; end: DocumentPosition } | null): void {
+    if (!selection) return;
+    this.lastFormatSelection = this.cloneSelection(selection);
+    this.lastFormatSelectionAt = Date.now();
+  }
+
+  private getFormatSelection(): { start: DocumentPosition; end: DocumentPosition } | null {
+    const live = this.cursor.getSelectionOrdered();
+    if (live) {
+      this.rememberFormatSelection(live);
+      return live;
+    }
+
+    if (!this.lastFormatSelection) return null;
+    if (Date.now() - this.lastFormatSelectionAt > 5000) {
+      this.lastFormatSelection = null;
+      this.lastFormatSelectionAt = 0;
+      return null;
+    }
+
+    return this.cloneSelection(this.lastFormatSelection);
+  }
+
+  private applyCharFormatFromToolbar(props: Partial<CharProperties>): boolean {
+    const selection = this.getFormatSelection();
+    if (!selection) return false;
+    this.applyCharPropsToRange(selection.start, selection.end, props);
+    return true;
   }
 
   /** 토글 서식 적용 (상호 배타 처리 포함) */
@@ -1487,9 +1540,15 @@ export class InputHandler {
   private updateSelection(): void {
     const sel = this.cursor.getSelectionOrdered();
     if (!sel) {
+      if (document.activeElement === this.textarea) {
+        this.lastFormatSelection = null;
+        this.lastFormatSelectionAt = 0;
+      }
       this.selectionRenderer.clear();
       return;
     }
+
+    this.rememberFormatSelection(sel);
 
     const { start, end } = sel;
     const zoom = this.viewportManager.getZoom();
@@ -2100,8 +2159,14 @@ export class InputHandler {
       return;
     }
     // 텍스트 선택 → textarea 포커스 후 execCommand
-    this.focusTextarea();
-    document.execCommand('copy');
+    const payload = this.copySelectedTextToInternalClipboard();
+    if (!payload) {
+      this.focusTextarea();
+      document.execCommand('copy');
+      return;
+    }
+
+    void this.writePlainTextToSystemClipboard(payload.text);
   }
 
   /** 잘라내기 (커맨드 시스템용 — 컨텍스트 메뉴/도구 상자에서 호출) */
@@ -2141,11 +2206,66 @@ export class InputHandler {
       return;
     }
     // 텍스트 선택 → textarea 포커스 후 execCommand
+    const payload = this.copySelectedTextToInternalClipboard();
+    if (!payload) {
+      this.focusTextarea();
+      document.execCommand('cut');
+      return;
+    }
+
+    void this.writePlainTextToSystemClipboard(payload.text);
+    this.deleteSelection();
     this.focusTextarea();
-    document.execCommand('cut');
+  }
+
+  performPaste(): void {
+    void this.performPasteInternal();
   }
 
   /** 전체 선택 (커맨드 시스템용) */
+  performDelete(): void {
+    if (this.cursor.isInPictureObjectSelection()) {
+      const ref = this.cursor.getSelectedPictureRef();
+      if (ref) {
+        this.cursor.moveOutOfSelectedPicture();
+        this.pictureObjectRenderer?.clear();
+        this.eventBus.emit('picture-object-selection-changed', false);
+        this.executeOperation({ kind: 'snapshot', operationType: 'deleteObject', operation: (wasm: WasmBridge) => {
+          if (ref.type === 'image') {
+            wasm.deletePictureControl(ref.sec, ref.ppi, ref.ci);
+          } else {
+            wasm.deleteShapeControl(ref.sec, ref.ppi, ref.ci);
+          }
+          return this.cursor.getPosition();
+        }});
+      }
+      return;
+    }
+
+    if (this.cursor.isInTableObjectSelection()) {
+      const ref = this.cursor.getSelectedTableRef();
+      if (ref) {
+        this.cursor.moveOutOfSelectedTable();
+        this.eventBus.emit('table-object-selection-changed', false);
+        this.executeOperation({ kind: 'snapshot', operationType: 'deleteTable', operation: (wasm: WasmBridge) => {
+          wasm.deleteTableControl(ref.sec, ref.ppi, ref.ci);
+          return this.cursor.getPosition();
+        }});
+      }
+      return;
+    }
+
+    if (this.cursor.hasSelection()) {
+      this.deleteSelection();
+      this.focusTextarea();
+      return;
+    }
+
+    const pos = this.cursor.getPosition();
+    this.handleDelete(pos, this.cursor.isInCell());
+    this.focusTextarea();
+  }
+
   performSelectAll(): void { this.handleSelectAll(); }
 
   /** 서식 토글 (커맨드 시스템용) */
@@ -2165,13 +2285,209 @@ export class InputHandler {
 
   /** 글꼴 크기 증감 (커맨드 시스템용, delta: HWPUNIT, 1pt=100) */
   adjustFontSize(delta: number): void {
-    if (!this.cursor.hasSelection()) return;
+    const selection = this.getFormatSelection();
+    if (!selection) return;
     const current = this.getCharPropertiesAtCursor();
     const newSize = Math.max(100, (current.fontSize ?? 1000) + delta); // 최소 1pt
-    this.applyCharFormat({ fontSize: newSize });
+    this.applyCharPropsToRange(selection.start, selection.end, { fontSize: newSize });
   }
 
   /** 스타일 적용 (커맨드 시스템용) */
+  private copySelectedTextToInternalClipboard(): { text: string; html: string } | null {
+    const selection = this.cursor.getSelectionOrdered();
+    if (!selection) return null;
+
+    const { start, end } = selection;
+    try {
+      if (start.parentParaIndex !== undefined) {
+        this.wasm.copySelectionInCell(
+          start.sectionIndex, start.parentParaIndex, start.controlIndex!, start.cellIndex!,
+          start.cellParaIndex!, start.charOffset,
+          end.cellParaIndex!, end.charOffset,
+        );
+      } else {
+        this.wasm.copySelection(
+          start.sectionIndex,
+          start.paragraphIndex, start.charOffset,
+          end.paragraphIndex, end.charOffset,
+        );
+      }
+
+      let html = '';
+      try {
+        html = start.parentParaIndex !== undefined
+          ? this.wasm.exportSelectionInCellHtml(
+              start.sectionIndex, start.parentParaIndex, start.controlIndex!, start.cellIndex!,
+              start.cellParaIndex!, start.charOffset,
+              end.cellParaIndex!, end.charOffset,
+            )
+          : this.wasm.exportSelectionHtml(
+              start.sectionIndex,
+              start.paragraphIndex, start.charOffset,
+              end.paragraphIndex, end.charOffset,
+            );
+      } catch {
+        html = '';
+      }
+
+      return {
+        text: this.wasm.getClipboardText(),
+        html,
+      };
+    } catch (err) {
+      console.warn('[InputHandler] 텍스트 복사 실패:', err);
+      return null;
+    }
+  }
+
+  private async writePlainTextToSystemClipboard(text: string): Promise<void> {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      console.warn('[InputHandler] 시스템 클립보드 쓰기 실패:', err);
+      this.focusTextarea();
+      document.execCommand('copy');
+    }
+  }
+
+  private pasteFromInternalClipboard(hasSelection: boolean): boolean {
+    if (!this.wasm.hasInternalClipboard()) {
+      return false;
+    }
+
+    const pos = this.cursor.getPosition();
+    if (this.wasm.clipboardHasControl() && pos.parentParaIndex === undefined) {
+      this.executeOperation({ kind: 'snapshot', operationType: 'pasteControl', operation: (wasm: WasmBridge) => {
+        if (hasSelection) this.deleteSelection();
+        const p = this.cursor.getPosition();
+        const result = wasm.pasteControl(p.sectionIndex, p.paragraphIndex, p.charOffset);
+        const parsed = JSON.parse(result);
+        if (parsed.ok) {
+          return {
+            sectionIndex: p.sectionIndex,
+            paragraphIndex: (parsed.paraIdx ?? p.paragraphIndex) + 1,
+            charOffset: 0,
+          } as DocumentPosition;
+        }
+        return p;
+      }});
+      return true;
+    }
+
+    this.executeOperation({ kind: 'snapshot', operationType: 'pasteInternal', operation: (wasm: WasmBridge) => {
+      if (hasSelection) this.deleteSelection();
+      const p = this.cursor.getPosition();
+      let result: string;
+      if (p.parentParaIndex !== undefined) {
+        result = wasm.pasteInternalInCell(
+          p.sectionIndex, p.parentParaIndex, p.controlIndex!,
+          p.cellIndex!, p.cellParaIndex!, p.charOffset,
+        );
+      } else {
+        result = wasm.pasteInternal(p.sectionIndex, p.paragraphIndex, p.charOffset);
+      }
+      const parsed = JSON.parse(result);
+      if (parsed.ok) {
+        const newPos: DocumentPosition = {
+          sectionIndex: p.sectionIndex,
+          paragraphIndex: parsed.paraIdx ?? p.paragraphIndex,
+          charOffset: parsed.charOffset ?? p.charOffset,
+        };
+        if (p.parentParaIndex !== undefined) {
+          newPos.parentParaIndex = p.parentParaIndex;
+          newPos.controlIndex = p.controlIndex;
+          newPos.cellIndex = p.cellIndex;
+          newPos.cellParaIndex = parsed.paraIdx ?? p.cellParaIndex;
+        }
+        return newPos;
+      }
+      return p;
+    }});
+
+    return true;
+  }
+
+  private pastePlainText(text: string, hasSelection: boolean): void {
+    if (!text) return;
+    if (hasSelection) {
+      this.deleteSelection();
+    }
+
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i]) {
+        this.executeOperation({ kind: 'command', command: new InsertTextCommand(this.cursor.getPosition(), lines[i]) });
+      }
+      if (i < lines.length - 1 && !this.cursor.isInCell()) {
+        this.executeOperation({ kind: 'command', command: new SplitParagraphCommand(this.cursor.getPosition()) });
+      }
+    }
+  }
+
+  private async performPasteInternal(): Promise<void> {
+    if (this.cursor.isInPictureObjectSelection()) {
+      this.cursor.moveOutOfSelectedPicture();
+      this.pictureObjectRenderer?.clear();
+      this.eventBus.emit('picture-object-selection-changed', false);
+    }
+    if (this.cursor.isInTableObjectSelection()) {
+      this.cursor.moveOutOfSelectedTable();
+      this.eventBus.emit('table-object-selection-changed', false);
+    }
+
+    const hasSelection = this.cursor.hasSelection();
+    if (this.pasteFromInternalClipboard(hasSelection)) {
+      this.focusTextarea();
+      return;
+    }
+
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        this.pastePlainText(text, hasSelection);
+      }
+    } catch (err) {
+      console.warn('[InputHandler] 시스템 클립보드 읽기 실패:', err);
+      this.focusTextarea();
+      document.execCommand('paste');
+      return;
+    }
+
+    this.focusTextarea();
+  }
+
+  private collapseSelectionToStart(): DocumentPosition {
+    const selection = this.cursor.getSelectionOrdered();
+    const target = selection?.start ?? this.cursor.getPosition();
+    this.cursor.clearSelection();
+    this.cursor.moveTo(target);
+    this.cursor.resetPreferredX();
+    return target;
+  }
+
+  performPageBreak(): boolean {
+    if (this.cursor.isInCell() || this.cursor.isInHeaderFooter() || this.cursor.isInFootnote()) {
+      return false;
+    }
+
+    const target = this.collapseSelectionToStart();
+    this.executeOperation({ kind: 'command', command: new InsertPageBreakCommand(target) });
+    this.focusTextarea();
+    return true;
+  }
+
+  performColumnBreak(): boolean {
+    if (this.cursor.isInCell() || this.cursor.isInHeaderFooter() || this.cursor.isInFootnote()) {
+      return false;
+    }
+
+    const target = this.collapseSelectionToStart();
+    this.executeOperation({ kind: 'command', command: new InsertColumnBreakCommand(target) });
+    this.focusTextarea();
+    return true;
+  }
+
   applyStyle(styleId: number): void {
     const pos = this.cursor.getPosition();
     try {

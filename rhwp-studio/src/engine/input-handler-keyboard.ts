@@ -2,7 +2,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { InsertTextCommand, InsertLineBreakCommand, InsertTabCommand, SplitParagraphCommand, SplitParagraphInCellCommand } from './command';
-import { matchShortcut, defaultShortcuts } from '@/command/shortcut-map';
+import {
+  beginShortcutChord,
+  matchShortcut,
+  resolveShortcutChord,
+} from '@/command/shortcut-map';
 import * as _connector from './input-handler-connector';
 import type { DocumentPosition } from '@/core/types';
 import type { WasmBridge } from '@/core/wasm-bridge';
@@ -96,8 +100,37 @@ const chordMapG: Record<string, string> = {
  *
  * 새 단축키 추가 시: shortcut-map.ts의 defaultShortcuts 테이블에 등록
  */
+function dispatchConfiguredShortcut(this: any, e: KeyboardEvent): boolean {
+  if (!this.dispatcher) return false;
+
+  const cmdId = matchShortcut(e, this);
+  if (cmdId) {
+    e.preventDefault();
+    this.dispatcher.dispatch(cmdId);
+    return true;
+  }
+
+  const pending = beginShortcutChord(e, this);
+  if (pending) {
+    e.preventDefault();
+    this.pendingShortcutChord = pending;
+    return true;
+  }
+
+  return false;
+}
+
 export function onKeyDown(this: any, e: KeyboardEvent): void {
   if (!this.active) return;
+  if (this.pendingShortcutChord) {
+    const cmdId = resolveShortcutChord(e, this.pendingShortcutChord, this);
+    this.pendingShortcutChord = null;
+    if (cmdId && this.dispatcher) {
+      e.preventDefault();
+      this.dispatcher.dispatch(cmdId);
+      return;
+    }
+  }
 
   // ─── 1. 코드 단축키 2번째 키 처리 (Ctrl+K → ? / Ctrl+N → ?) ───
   if (this._pendingChordK) {
@@ -676,17 +709,14 @@ export function onKeyDown(this: any, e: KeyboardEvent): void {
   }
 
   // Alt 조합 단축키 처리
-  if (e.altKey && this.dispatcher) {
+  if (e.altKey) {
     // Alt+V → Chord 대기 (보기 메뉴 단축키, 한컴 Alt+V,T 계승)
     if ((e.key === 'v' || e.key === 'V' || e.key === 'ㅍ') && !e.shiftKey && !e.ctrlKey) {
       e.preventDefault();
       this._pendingChordV = true;
       return;
     }
-    const cmdId = matchShortcut(e, defaultShortcuts);
-    if (cmdId) {
-      e.preventDefault();
-      this.dispatcher.dispatch(cmdId);
+    if (dispatchConfiguredShortcut.call(this, e)) {
       return;
     }
   }
@@ -842,11 +872,7 @@ export function onKeyDown(this: any, e: KeyboardEvent): void {
     default: {
       // Function 키(F1~F12) 등 Ctrl 없는 단축키 처리
       if (this.dispatcher) {
-        const cmdId = matchShortcut(e, defaultShortcuts);
-        if (cmdId) {
-          e.preventDefault();
-          this.dispatcher.dispatch(cmdId);
-        }
+        dispatchConfiguredShortcut.call(this, e);
       }
       break;
     }
@@ -863,10 +889,7 @@ export function handleCtrlKey(this: any, e: KeyboardEvent): void {
 
   // 커맨드 시스템 경유 단축키 처리
   if (this.dispatcher) {
-    const cmdId = matchShortcut(e, defaultShortcuts);
-    if (cmdId) {
-      e.preventDefault();
-      this.dispatcher.dispatch(cmdId);
+    if (dispatchConfiguredShortcut.call(this, e)) {
       return;
     }
   }
@@ -906,10 +929,10 @@ export function handleCtrlKey(this: any, e: KeyboardEvent): void {
       e.preventDefault();
       if (e.shiftKey) {
         this.cursor.setAnchor();
-        this.cursor.moveToDocumentEnd();
+        this.cursor.moveToTrueDocumentEnd();
       } else {
         this.cursor.clearSelection();
-        this.cursor.moveToDocumentEnd();
+        this.cursor.moveToTrueDocumentEnd();
       }
       this.updateCaret();
       break;
@@ -920,10 +943,13 @@ export function handleCtrlKey(this: any, e: KeyboardEvent): void {
 
 export function handleSelectAll(this: any): void {
   // anchor를 문서 시작, focus를 문서 끝으로 설정
-  this.cursor.moveTo({ sectionIndex: 0, paragraphIndex: 0, charOffset: 0 });
+  this.cursor.clearSelection();
+  this.cursor.moveToDocumentStart();
   this.cursor.setAnchor();
-  this.cursor.moveToDocumentEnd();
+  this.cursor.moveToTrueDocumentEnd();
+  this.active = true;
   this.updateCaret();
+  this.textarea?.focus();
 }
 
 export function onCopy(this: any, e: ClipboardEvent): void {

@@ -198,7 +198,8 @@ export async function moveCursorToStart(page) {
 /** 커서를 문서 끝으로 이동한다 */
 export async function moveCursorToEnd(page) {
   await page.evaluate(() => {
-    window.__inputHandler?.cursor?.moveToDocumentEnd?.();
+    window.__inputHandler?.cursor?.moveToTrueDocumentEnd?.()
+      ?? window.__inputHandler?.cursor?.moveToDocumentEnd?.();
   });
   await page.evaluate(() => new Promise(r => setTimeout(r, 100)));
 }

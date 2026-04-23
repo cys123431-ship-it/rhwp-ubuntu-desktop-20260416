@@ -57,6 +57,24 @@ struct SaveDocumentResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SaveBinaryRequest {
+    suggested_name: String,
+    file_path: Option<String>,
+    format: String,
+    mime_type: String,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveBinaryResult {
+    file_name: String,
+    file_path: Option<String>,
+    format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RecentDocument {
     name: String,
     path: Option<String>,
@@ -134,6 +152,46 @@ fn format_from_path(path: &Path) -> String {
     {
         "hwpx" => "hwpx".to_string(),
         _ => "hwp".to_string(),
+    }
+}
+
+fn binary_extension_for_format(format: &str) -> &'static str {
+    match format.to_ascii_lowercase().as_str() {
+        "hwpx" => ".hwpx",
+        "pdf" => ".pdf",
+        "docx" => ".docx",
+        "jpg" | "jpeg" => ".jpg",
+        _ => ".hwp",
+    }
+}
+
+fn normalize_binary_name(file_name: &str, format: &str) -> String {
+    let extension = binary_extension_for_format(format);
+
+    if file_name.to_ascii_lowercase().ends_with(extension) {
+        file_name.to_string()
+    } else {
+        let trimmed = file_name
+            .trim_end_matches(".hwp")
+            .trim_end_matches(".hwpx")
+            .trim_end_matches(".pdf")
+            .trim_end_matches(".docx")
+            .trim_end_matches(".jpg")
+            .trim_end_matches(".jpeg");
+        format!("{trimmed}{extension}")
+    }
+}
+
+fn save_dialog_for_binary_format(
+    dialog: rfd::FileDialog,
+    format: &str,
+) -> rfd::FileDialog {
+    match format.to_ascii_lowercase().as_str() {
+        "hwpx" => dialog.add_filter("HWPX documents", &["hwpx"]),
+        "pdf" => dialog.add_filter("PDF documents", &["pdf"]),
+        "docx" => dialog.add_filter("Word documents", &["docx"]),
+        "jpg" | "jpeg" => dialog.add_filter("JPEG images", &["jpg", "jpeg"]),
+        _ => dialog.add_filter("HWP documents", &["hwp"]),
     }
 }
 
@@ -635,6 +693,58 @@ fn save_document(
 }
 
 #[tauri::command]
+fn save_binary_file(
+    request: SaveBinaryRequest,
+) -> Result<Option<SaveBinaryResult>, String> {
+    let target_path = request.file_path.clone().map(PathBuf::from);
+
+    let selected_path = match target_path {
+        Some(path) => path,
+        None => {
+            let suggested_name = normalize_binary_name(&request.suggested_name, &request.format);
+            let picked = save_dialog_for_binary_format(
+                rfd::FileDialog::new().set_file_name(&suggested_name),
+                &request.format,
+            )
+            .save_file();
+
+            let Some(path) = picked else {
+                return Ok(None);
+            };
+            path
+        }
+    };
+
+    if let Some(parent) = selected_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+
+    fs::write(&selected_path, &request.bytes).map_err(|err| err.to_string())?;
+
+    Ok(Some(SaveBinaryResult {
+        file_name: selected_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("export")
+            .to_string(),
+        file_path: Some(selected_path.to_string_lossy().to_string()),
+        format: request.format,
+    }))
+}
+
+#[tauri::command]
+fn pick_export_directory() -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .pick_folder()
+        .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn export_pdf_from_svgs(svgs: Vec<String>) -> Result<Vec<u8>, String> {
+    rhwp::renderer::pdf::svgs_to_pdf(&svgs).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn get_recent_documents(app: AppHandle) -> Result<Vec<RecentDocument>, String> {
     load_recent_documents(&app)
 }
@@ -818,6 +928,9 @@ fn main() {
             open_document_at_path,
             consume_startup_files,
             save_document,
+            save_binary_file,
+            pick_export_directory,
+            export_pdf_from_svgs,
             get_recent_documents,
             get_file_association_status,
             set_default_file_association,

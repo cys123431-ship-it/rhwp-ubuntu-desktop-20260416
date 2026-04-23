@@ -13,8 +13,11 @@ export interface DocumentInfo {
 
 /** WASM getPageInfo() 반환 타입 */
 export type DocumentFormat = 'hwp' | 'hwpx' | 'unknown';
+export type ExportTargetFormat = 'hwp' | 'hwpx' | 'pdf' | 'docx' | 'jpg';
+export type JpgExportScope = 'current' | 'all';
 export type DocumentEditMode = 'editable-safe' | 'protected-view';
 export type CompatibilitySeverity = 'blocker' | 'warning' | 'info';
+export type FontResolutionKind = 'exact' | 'alias' | 'substitute';
 
 export interface CompatibilityIssue {
   code: string;
@@ -34,6 +37,7 @@ export interface FontSubstitutionItem {
   original: string;
   resolved: string;
   substituted: boolean;
+  resolutionKind: FontResolutionKind;
 }
 
 export interface FontSubstitutionReport {

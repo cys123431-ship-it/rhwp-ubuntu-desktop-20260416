@@ -726,8 +726,8 @@ mod tests_clean {
         let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("rhwp-studio/public/samples/form-002.hwpx");
         let bytes = std::fs::read(sample).expect("read form-002.hwpx");
-        let core = crate::document_core::DocumentCore::from_bytes(&bytes)
-            .expect("parse form-002.hwpx");
+        let core =
+            crate::document_core::DocumentCore::from_bytes(&bytes).expect("parse form-002.hwpx");
         let report = core.compatibility_report_data();
         assert_eq!(
             report.edit_mode,
@@ -737,8 +737,8 @@ mod tests_clean {
         );
 
         let saved = core.export_hwpx_native().expect("serialize form-002.hwpx");
-        let reparsed_core = crate::document_core::DocumentCore::from_bytes(&saved)
-            .expect("reparse form-002.hwpx");
+        let reparsed_core =
+            crate::document_core::DocumentCore::from_bytes(&saved).expect("reparse form-002.hwpx");
         let reparsed_report = reparsed_core.compatibility_report_data();
         assert_eq!(
             reparsed_report.edit_mode,
