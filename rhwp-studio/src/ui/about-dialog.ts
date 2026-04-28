@@ -18,9 +18,23 @@ const THIRD_PARTY_LICENSES = [
   { name: 'console_error_panic_hook', license: 'MIT / Apache-2.0' },
 ];
 
+const DESKTOP_RELEASE_VERSION = '0.1.5';
+
+const RELEASE_HIGHLIGHTS = [
+  '제품 정보에 이번 설치본 변경사항을 표시',
+  '한컴 단축키: 블록 글자 크기 Alt+Shift+E/R 및 Ctrl+]/[ 검증',
+  '도구 상자: 오려두기, 복사, 붙이기, 모양 복사, 격자 보기 연결 보강',
+  '모양 복사: 현재 형식을 복사해 선택 영역에 적용',
+  'Windows current-user 설치본 및 .hwp/.hwpx 연결 확인',
+];
+
+const TRACKED_LIMITATIONS = [
+  '하이퍼링크와 미주는 버튼 연결 및 상태 추적 완료, 실제 편집 구현은 후속 작업',
+];
+
 export class AboutDialog extends ModalDialog {
   constructor() {
-    super('제품 정보', 460);
+    super('제품 정보', 540);
   }
 
   protected createBody(): HTMLElement {
@@ -42,7 +56,7 @@ export class AboutDialog extends ModalDialog {
     // 버전
     const version = document.createElement('div');
     version.className = 'about-version';
-    version.textContent = `Version ${__APP_VERSION__}`;
+    version.textContent = `Core ${__APP_VERSION__} / Desktop ${DESKTOP_RELEASE_VERSION}`;
     body.appendChild(version);
 
     // 기술 스택
@@ -57,6 +71,25 @@ export class AboutDialog extends ModalDialog {
     notice.textContent =
       '본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.';
     body.appendChild(notice);
+
+    const releaseTitle = document.createElement('div');
+    releaseTitle.className = 'about-release-title';
+    releaseTitle.textContent = `이번 설치본 변경사항 v${DESKTOP_RELEASE_VERSION}`;
+    body.appendChild(releaseTitle);
+
+    const releaseList = document.createElement('ul');
+    releaseList.className = 'about-release-list';
+    for (const item of RELEASE_HIGHLIGHTS) {
+      const li = document.createElement('li');
+      li.textContent = item;
+      releaseList.appendChild(li);
+    }
+    body.appendChild(releaseList);
+
+    const limitations = document.createElement('div');
+    limitations.className = 'about-release-note';
+    limitations.textContent = TRACKED_LIMITATIONS.join(' ');
+    body.appendChild(limitations);
 
     // 오픈소스 라이선스
     const licenseTitle = document.createElement('div');
