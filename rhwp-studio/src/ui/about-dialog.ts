@@ -18,9 +18,10 @@ const THIRD_PARTY_LICENSES = [
   { name: 'console_error_panic_hook', license: 'MIT / Apache-2.0' },
 ];
 
-const DESKTOP_RELEASE_VERSION = '0.1.6';
+const DESKTOP_RELEASE_VERSION = '0.1.7';
 
 const RELEASE_HIGHLIGHTS = [
+  '앱 아이콘과 GitHub README 로고를 새 금속 한글 심볼 아이콘으로 교체',
   'Ctrl+A/드래그 블록 선택 시 화면 하이라이트가 실제 선택 범위 끝 줄까지 표시되도록 수정',
   '선택 표시를 줄 정보 추정값이 아니라 실제 렌더된 글자 조각(TextRun) 기준으로 계산',
   '블록 선택 후 글자 크기/서식 변경 시 논리 선택과 시각 표시가 일치하는지 E2E 검증 추가',
