@@ -1,12 +1,12 @@
 /**
- * 제품 정보 / 라이센스 다이얼로그
+ * 제품 정보 / 라이선스 대화상자.
  *
- * HWP 공개 스펙(hwp_spec_5.0) 저작권 조항에 따른 필수 고지 문구를 포함한다.
- * 사용된 외부 크레이트의 오픈소스 라이선스 목록도 표시한다.
+ * 공개 HWP 문서 형식을 참고한 호환 구현임을 고지하고,
+ * 데스크톱 설치본에서 사용자가 현재 수정 사항을 바로 확인할 수 있게 표시한다.
  */
 import { ModalDialog } from './dialog';
 
-/** 외부 크레이트 라이선스 정보 */
+/** 주요 오픈소스 의존성 라이선스 정보 */
 const THIRD_PARTY_LICENSES = [
   { name: 'wasm-bindgen', license: 'MIT / Apache-2.0' },
   { name: 'web-sys', license: 'MIT / Apache-2.0' },
@@ -18,18 +18,18 @@ const THIRD_PARTY_LICENSES = [
   { name: 'console_error_panic_hook', license: 'MIT / Apache-2.0' },
 ];
 
-const DESKTOP_RELEASE_VERSION = '0.1.5';
+const DESKTOP_RELEASE_VERSION = '0.1.6';
 
 const RELEASE_HIGHLIGHTS = [
-  '제품 정보에 이번 설치본 변경사항을 표시',
-  '한컴 단축키: 블록 글자 크기 Alt+Shift+E/R 및 Ctrl+]/[ 검증',
-  '도구 상자: 오려두기, 복사, 붙이기, 모양 복사, 격자 보기 연결 보강',
-  '모양 복사: 현재 형식을 복사해 선택 영역에 적용',
-  'Windows current-user 설치본 및 .hwp/.hwpx 연결 확인',
+  'Ctrl+A/드래그 블록 선택 시 화면 하이라이트가 실제 선택 범위 끝 줄까지 표시되도록 수정',
+  '선택 표시를 줄 정보 추정값이 아니라 실제 렌더된 글자 조각(TextRun) 기준으로 계산',
+  '블록 선택 후 글자 크기/서식 변경 시 논리 선택과 시각 표시가 일치하는지 E2E 검증 추가',
+  '한글 기본 단축키와 도구 상자 개선 사항은 v0.1.5 기준 변경을 포함',
+  'Windows current-user 설치본 및 .hwp/.hwpx 파일 연결 확인 대상',
 ];
 
 const TRACKED_LIMITATIONS = [
-  '하이퍼링크와 미주는 버튼 연결 및 상태 추적 완료, 실제 편집 구현은 후속 작업',
+  '남은 한컴 호환 기능은 기능/단축키 추적표 기준으로 계속 검증합니다. 한컴 자산이나 전용 폰트 재배포는 포함하지 않습니다.',
 ];
 
 export class AboutDialog extends ModalDialog {
@@ -47,7 +47,7 @@ export class AboutDialog extends ModalDialog {
     titleEn.textContent = 'HWP 5.0 Compatible Module for Rust';
     body.appendChild(titleEn);
 
-    // 제품 한글명
+    // 제품 한국어명
     const titleKo = document.createElement('div');
     titleKo.className = 'about-product-name-ko';
     titleKo.textContent = '한글 문서 호환 저장 도구';
@@ -65,11 +65,11 @@ export class AboutDialog extends ModalDialog {
     tech.textContent = 'Rust + WebAssembly + TypeScript';
     body.appendChild(tech);
 
-    // HWP 스펙 고지 문구 (필수)
+    // HWP 공개 문서 참고 고지
     const notice = document.createElement('div');
     notice.className = 'about-notice';
     notice.textContent =
-      '본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.';
+      '본 제품은 한글과컴퓨터의 한글 문서 파일(.hwp/.hwpx) 공개 문서를 참고하여 개발한 호환 구현입니다.';
     body.appendChild(notice);
 
     const releaseTitle = document.createElement('div');
@@ -121,12 +121,12 @@ export class AboutDialog extends ModalDialog {
   }
 
   protected onConfirm(): void {
-    // 정보 표시 전용 — 확인 동작 없음
+    // 정보 표시용 대화상자이므로 확인 동작 없음
   }
 
   override show(): void {
     super.show();
-    // footer를 "닫기" 버튼 하나로 교체
+    // footer를 닫기 버튼 하나로 교체
     const footer = this.dialog.querySelector('.dialog-footer');
     if (footer) {
       footer.innerHTML = '';

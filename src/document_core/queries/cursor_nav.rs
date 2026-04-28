@@ -1314,6 +1314,157 @@ impl DocumentCore {
             None
         }
 
+        fn collect_visual_selection_rects(
+            node: &RenderNode,
+            page: u32,
+            section_idx: usize,
+            start_para_idx: usize,
+            start_char_offset: usize,
+            end_para_idx: usize,
+            end_char_offset: usize,
+            cell_ctx: Option<(usize, usize, usize)>,
+            rects: &mut Vec<String>,
+        ) {
+            if let RenderNodeType::TextRun(ref tr) = node.node_type {
+                let Some(run_start) = tr.char_start else {
+                    for child in &node.children {
+                        collect_visual_selection_rects(
+                            child,
+                            page,
+                            section_idx,
+                            start_para_idx,
+                            start_char_offset,
+                            end_para_idx,
+                            end_char_offset,
+                            cell_ctx,
+                            rects,
+                        );
+                    }
+                    return;
+                };
+
+                let run_para_idx = if let Some((ppi, ci, cei)) = cell_ctx {
+                    let Some(ctx) = tr.cell_context.as_ref() else {
+                        for child in &node.children {
+                            collect_visual_selection_rects(
+                                child,
+                                page,
+                                section_idx,
+                                start_para_idx,
+                                start_char_offset,
+                                end_para_idx,
+                                end_char_offset,
+                                cell_ctx,
+                                rects,
+                            );
+                        }
+                        return;
+                    };
+                    let Some(first) = ctx.path.first() else {
+                        return;
+                    };
+                    if ctx.parent_para_index != ppi
+                        || first.control_index != ci
+                        || first.cell_index != cei
+                    {
+                        for child in &node.children {
+                            collect_visual_selection_rects(
+                                child,
+                                page,
+                                section_idx,
+                                start_para_idx,
+                                start_char_offset,
+                                end_para_idx,
+                                end_char_offset,
+                                cell_ctx,
+                                rects,
+                            );
+                        }
+                        return;
+                    }
+                    first.cell_para_index
+                } else {
+                    if tr.section_index != Some(section_idx) || tr.cell_context.is_some() {
+                        for child in &node.children {
+                            collect_visual_selection_rects(
+                                child,
+                                page,
+                                section_idx,
+                                start_para_idx,
+                                start_char_offset,
+                                end_para_idx,
+                                end_char_offset,
+                                cell_ctx,
+                                rects,
+                            );
+                        }
+                        return;
+                    }
+                    let Some(para_idx) = tr.para_index else {
+                        return;
+                    };
+                    para_idx
+                };
+
+                if run_para_idx >= start_para_idx && run_para_idx <= end_para_idx {
+                    let text_len = tr.text.chars().count();
+                    let run_end = run_start + text_len;
+                    let sel_start = if run_para_idx == start_para_idx {
+                        start_char_offset
+                    } else {
+                        0
+                    };
+                    let sel_end = if run_para_idx == end_para_idx {
+                        end_char_offset
+                    } else {
+                        usize::MAX
+                    };
+
+                    let overlap_start = sel_start.max(run_start);
+                    let overlap_end = sel_end.min(run_end);
+                    if overlap_start < overlap_end {
+                        let positions = compute_char_positions(&tr.text, &tr.style);
+                        let x_at = |local: usize| -> f64 {
+                            if local < positions.len() {
+                                positions[local]
+                            } else {
+                                positions
+                                    .last()
+                                    .copied()
+                                    .unwrap_or(node.bbox.width.max(0.0))
+                            }
+                        };
+                        let local_start = overlap_start.saturating_sub(run_start);
+                        let local_end = overlap_end.saturating_sub(run_start);
+                        let x1 = x_at(local_start);
+                        let x2 = x_at(local_end);
+                        let rect_x = node.bbox.x + x1.min(x2);
+                        let width = (x2 - x1).abs();
+                        if width > 0.01 {
+                            rects.push(format!(
+                                "{{\"pageIndex\":{},\"x\":{:.1},\"y\":{:.1},\"width\":{:.1},\"height\":{:.1}}}",
+                                page, rect_x, node.bbox.y, width, node.bbox.height
+                            ));
+                        }
+                    }
+                }
+            }
+
+            for child in &node.children {
+                collect_visual_selection_rects(
+                    child,
+                    page,
+                    section_idx,
+                    start_para_idx,
+                    start_char_offset,
+                    end_para_idx,
+                    end_char_offset,
+                    cell_ctx,
+                    rects,
+                );
+            }
+        }
+
         // ── 페이지별 렌더 트리 캐시 (최대 2페이지) ──
         let mut tree_cache: Vec<(u32, crate::renderer::render_tree::PageRenderTree)> = Vec::new();
 
@@ -1338,6 +1489,36 @@ impl DocumentCore {
         // 주요 페이지 트리 미리 빌드
         for &pn in &page_nums {
             tree_cache.push((pn, self.build_page_tree(pn)?));
+        }
+
+        if cell_ctx.is_none() {
+            for para_idx in start_para_idx..=end_para_idx {
+                if let Ok(pp) = self.find_pages_for_paragraph(section_idx, para_idx) {
+                    for &pn in &pp {
+                        if !tree_cache.iter().any(|(p, _)| *p == pn) {
+                            tree_cache.push((pn, self.build_page_tree(pn)?));
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut visual_rects: Vec<String> = Vec::new();
+        for (pn, tree) in &tree_cache {
+            collect_visual_selection_rects(
+                &tree.root,
+                *pn,
+                section_idx,
+                start_para_idx,
+                start_char_offset,
+                end_para_idx,
+                end_char_offset,
+                cell_ctx,
+                &mut visual_rects,
+            );
+        }
+        if !visual_rects.is_empty() {
+            return Ok(format!("[{}]", visual_rects.join(",")));
         }
 
         // 캐시에서 트리 참조를 가져오거나, 없으면 빌드 후 추가
