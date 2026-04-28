@@ -1,0 +1,27 @@
+id	area	hancom_baseline	rhwp_surface	hwpctl_action	wasm_or_core	evidence	status	priority	web_gate	ubuntu_gate	windows_gate	notes
+HF-FILE-001	파일	HWP/HWPX 열기	파일 메뉴/드래그/샘플 로더	Open	DocumentCore parse/load	compat-corpus phase manifests	partial	P0	TBD	TBD	TBD	문서별 editMode와 보호 보기 기준 분리 필요
+HF-FILE-002	파일	저장/다른 이름 저장	파일 메뉴 Save/SaveAs	Save	DocumentCore save	manual and E2E gaps	partial	P0	TBD	TBD	TBD	저장 후 재파싱과 한컴 열기 검증이 완료 조건
+HF-FILE-003	파일	PDF/SVG/JPG 내보내기	파일 메뉴 export/export-svg	Export*	render/export commands	compat-report and CLI export	partial	P1	TBD	TBD	TBD	데스크톱 PDF와 웹 SVG/JPG 경로 분리
+HF-EDIT-001	편집	블록 선택/전체 선택/삭제	편집 영역 InputHandler	SelectAll/Delete	cursor and text commands	editing-core-regression.test.mjs	implemented	P0	pass	TBD	TBD	표/개체 선택 모드는 별도 행에서 관리
+HF-EDIT-002	편집	Undo/Redo	편집 메뉴/단축키	Undo/Redo	CommandHistory/Snapshot	editing-core-regression.test.mjs	implemented	P0	pass	TBD	TBD	hwpctl executeWithUndo 포함
+HF-FORMAT-001	서식	블록 후 글자 크기 조절	서식 도구/단축키	CharShape	ApplyCharFormatCommand	block-font-size-shortcuts.test.mjs	implemented	P0	pass	TBD	TBD	Alt+Shift+E/R와 Ctrl+]/[ 모두 검증
+HF-FORMAT-002	서식	글자 모양	Alt+L 대화상자	CharShape	applyCharPropsToRange	manual gap	partial	P0	TBD	TBD	TBD	선택 없음 입력 속성, 글꼴/장평/자간 세부 검증 필요
+HF-FORMAT-003	서식	문단 모양	Alt+T 대화상자	ParagraphShape	applyParaFormat	manual gap	partial	P0	TBD	TBD	TBD	다중 문단/표 셀/저장 재열기 검증 필요
+HF-FORMAT-004	서식	스타일 적용	스타일 대화상자	Style	TBD	manual gap	stub	P1	TBD	TBD	TBD	한컴 스타일 목록/적용/편집/저장 기준 필요
+HF-VIEW-001	보기	확대/축소/쪽 맞춤	보기 메뉴/상태표시줄	ViewZoom	ViewportManager	shortcut-map-static.test.mjs	implemented	P2	pass	TBD	TBD	시각 회귀 스크린샷 추가 필요
+HF-VIEW-002	보기	조판 부호/문단 부호	보기 메뉴	ViewMarks	Canvas render flags	manual gap	partial	P1	TBD	TBD	TBD	저장 대상 아님, 표시 상태만 검증
+HF-INPUT-001	입력	본문 텍스트 입력	편집 영역	InsertText	InsertTextCommand	text-flow/editing tests	implemented	P0	pass	TBD	TBD	IME 조합과 긴 문서 성능 검증 필요
+HF-INPUT-002	입력	표/그림/도형/수식 삽입	입력/표 메뉴	TableCreate/InsertPicture	controls core	manual gap	partial	P0	TBD	TBD	TBD	개체 좌표/캡션/저장 재열기 별도 검증
+HF-INPUT-003	입력	필드/하이퍼링크/책갈피	입력 메뉴	Field/Hyperlink/Bookmark	fields core	compat reports	partial	P0	TBD	TBD	TBD	필드 값 저장 손상 방지 기준 필요
+HF-PAGE-001	쪽	쪽 나누기/단 나누기	쪽 메뉴/단축키	BreakPage/BreakColumn	text editing core	editing-core-regression.test.mjs	implemented	P0	pass	TBD	TBD	한컴 재열기 검증 필요
+HF-PAGE-002	쪽	구역/다단/쪽 번호 위치	쪽 메뉴	BreakSection/PageNumPos	section/page core	manual gap	partial	P0	TBD	TBD	TBD	최근 core 연결 후 golden corpus 필요
+HF-PAGE-003	쪽	머리말/꼬리말/각주/미주	쪽/입력 메뉴	HeaderFooter/Note	note/header core	compat reports	partial	P0	TBD	TBD	TBD	번호/위치/저장 재열기 검증 필요
+HF-TABLE-001	표	표 생성/행열 삽입 삭제	표 메뉴	TableCreate/TableInsertRowColumn	table core	table E2E gap	partial	P0	TBD	TBD	TBD	한컴의 방향/선택 규칙과 비교 필요
+HF-TABLE-002	표	셀 합치기/나누기/셀 블록	표 메뉴/F5	TableMerge/TableSplit	table selection core	manual gap	partial	P0	TBD	TBD	TBD	F5 단계 선택과 저장 검증 필요
+HF-TABLE-003	표	블록 계산식/합계/평균	표 메뉴	TableFormula	table formula core	manual gap	stub	P1	TBD	TBD	TBD	기존 stub 명령을 숨기지 않고 추적
+HF-REVIEW-001	검토	찾기/바꾸기	편집 메뉴	Find/Replace	search core	manual gap	partial	P1	TBD	TBD	TBD	치환 Undo와 범위 검색 검증 필요
+HF-REVIEW-002	검토	맞춤법/주석	검토/입력 메뉴	Spell/Comment	TBD	manual gap	partial	P2	TBD	TBD	TBD	맞춤법은 외부 사전/라이선스 정책 필요
+HF-SECURITY-001	보안	문서 암호/보호 보기	보호 보기/저장 제한	Security	TBD	security audit docs	partial	P0	TBD	TBD	TBD	손상 방지와 저장 차단이 성공 기준
+HF-PLATFORM-001	플랫폼	웹 정적 배포	Vite build	N/A	WASM public API	cmd /c npm run build	partial	P0	pass	N/A	N/A	브라우저별 저장 권한 검증 필요
+HF-PLATFORM-002	플랫폼	Windows 설치/파일 연결	NSIS/MSI/current-user	N/A	Tauri desktop	manual install	partial	P0	N/A	N/A	partial	사용자 설치본은 확인, 관리자 설치본은 별도
+HF-PLATFORM-003	플랫폼	Ubuntu .deb 설치	.deb package	N/A	Tauri desktop	manual gap	partial	P0	N/A	TBD	N/A	22.04/24.04 설치 스모크 필요

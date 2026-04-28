@@ -476,6 +476,8 @@ interface ParaFormatEntry {
   endOffset: number;
   /** undo용: 적용 전 charShapeId */
   prevCharShapeId?: number;
+  /** undo용: 현재 WASM이 charShapeId 직접 복원을 지원하지 않는 경우를 위한 전체 속성 백업 */
+  prevProps?: CharProperties;
 }
 
 export class ApplyCharFormatCommand implements EditCommand {
@@ -510,7 +512,7 @@ export class ApplyCharFormatCommand implements EditCommand {
 
         // undo용 이전 서식 저장
         const prevProps = wasm.getCellCharPropertiesAt(sec, ppi, ci, cei, p, from);
-        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId });
+        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId, prevProps });
 
         wasm.applyCharFormatInCell(sec, ppi, ci, cei, p, from, to, propsJson);
       }
@@ -526,7 +528,7 @@ export class ApplyCharFormatCommand implements EditCommand {
         if (to <= from) continue;
 
         const prevProps = wasm.getCharPropertiesAt(sec, p, from);
-        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId });
+        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId, prevProps });
 
         wasm.applyCharFormat(sec, p, from, to, propsJson);
       }
@@ -540,8 +542,11 @@ export class ApplyCharFormatCommand implements EditCommand {
 
     // 이전 charShapeId로 복원
     for (const entry of this.entries) {
-      if (entry.prevCharShapeId === undefined) continue;
-      const restoreJson = JSON.stringify({ charShapeId: entry.prevCharShapeId });
+      if (entry.prevCharShapeId === undefined && !entry.prevProps) continue;
+      const restoreJson = JSON.stringify({
+        ...(entry.prevProps ?? {}),
+        ...(entry.prevCharShapeId !== undefined ? { charShapeId: entry.prevCharShapeId } : {}),
+      });
 
       if (isCell(start)) {
         wasm.applyCharFormatInCell(

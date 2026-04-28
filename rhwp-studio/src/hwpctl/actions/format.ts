@@ -94,14 +94,11 @@ function executeCharShape(ctrl: HwpCtrl, set: ParameterSet | null): boolean {
   const cursor = ctrl.getCursor();
   const json = charShapeSetToJson(set);
 
-  try {
+  return ctrl.executeWithUndo(() => {
     // 현재 문단 전체에 적용 (선택 영역이 없으면)
     const result = doc.applyCharFormat(cursor.section, cursor.para, 0, 65535, json);
     return JSON.parse(result).ok === true;
-  } catch (e) {
-    console.error('[hwpctl] CharShape 실패:', e);
-    return false;
-  }
+  });
 }
 
 function executeParagraphShape(ctrl: HwpCtrl, set: ParameterSet | null): boolean {
@@ -110,13 +107,10 @@ function executeParagraphShape(ctrl: HwpCtrl, set: ParameterSet | null): boolean
   const cursor = ctrl.getCursor();
   const json = paraShapeSetToJson(set);
 
-  try {
+  return ctrl.executeWithUndo(() => {
     const result = doc.applyParaFormat(cursor.section, cursor.para, json);
     return JSON.parse(result).ok === true;
-  } catch (e) {
-    console.error('[hwpctl] ParagraphShape 실패:', e);
-    return false;
-  }
+  });
 }
 
 function executeCharShapeToggle(prop: string) {
@@ -124,21 +118,18 @@ function executeCharShapeToggle(prop: string) {
     const doc = ctrl.getWasmDoc();
     const cursor = ctrl.getCursor();
 
-    try {
+    return ctrl.executeWithUndo(() => {
       // 현재 상태를 반전 (toggle)
       const json = JSON.stringify({ [prop]: true });
       const result = doc.applyCharFormat(cursor.section, cursor.para, 0, 65535, json);
       return JSON.parse(result).ok === true;
-    } catch (e) {
-      console.error(`[hwpctl] CharShape${prop} 실패:`, e);
-      return false;
-    }
+    });
   };
 }
 
 // Action 등록
-registerAction({ id: 'CharShape', parameterSetId: 'CharShape', description: '글자 모양', executor: executeCharShape });
-registerAction({ id: 'ParagraphShape', parameterSetId: 'ParaShape', description: '문단 모양', executor: executeParagraphShape });
-registerAction({ id: 'CharShapeBold', parameterSetId: null, description: '진하게', executor: executeCharShapeToggle('bold') });
-registerAction({ id: 'CharShapeItalic', parameterSetId: null, description: '이탤릭', executor: executeCharShapeToggle('italic') });
-registerAction({ id: 'CharShapeUnderline', parameterSetId: null, description: '밑줄', executor: executeCharShapeToggle('underline') });
+registerAction({ id: 'CharShape', parameterSetId: 'CharShape', description: '글자 모양', executor: executeCharShape, compatibilityStatus: 'partial', statusNote: '주요 CharShape 항목만 rhwp 서식 JSON으로 매핑합니다.' });
+registerAction({ id: 'ParagraphShape', parameterSetId: 'ParaShape', description: '문단 모양', executor: executeParagraphShape, compatibilityStatus: 'partial', statusNote: '주요 ParaShape 항목만 rhwp 서식 JSON으로 매핑합니다.' });
+registerAction({ id: 'CharShapeBold', parameterSetId: null, description: '진하게', executor: executeCharShapeToggle('bold'), compatibilityStatus: 'implemented', statusNote: '굵게 토글 기본 동작을 지원합니다.' });
+registerAction({ id: 'CharShapeItalic', parameterSetId: null, description: '이탤릭', executor: executeCharShapeToggle('italic'), compatibilityStatus: 'implemented', statusNote: '기울임 토글 기본 동작을 지원합니다.' });
+registerAction({ id: 'CharShapeUnderline', parameterSetId: null, description: '밑줄', executor: executeCharShapeToggle('underline'), compatibilityStatus: 'implemented', statusNote: '밑줄 토글 기본 동작을 지원합니다.' });

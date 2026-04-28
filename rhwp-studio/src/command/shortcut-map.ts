@@ -115,7 +115,9 @@ export const hancomShortcuts: ShortcutBinding[] = [
   single('format:para-shape', 'Alt+T', alt('t')),
   chord('format:para-num-shape', 'Ctrl+K,N', ctrl('k'), plain('n')),
   single('format:font-size-increase', 'Ctrl+]', ctrl(']')),
+  single('format:font-size-increase', 'Alt+Shift+E', alt('e', { shift: true })),
   single('format:font-size-decrease', 'Ctrl+[', ctrl('[')),
+  single('format:font-size-decrease', 'Alt+Shift+R', alt('r', { shift: true })),
   single('format:line-spacing-decrease', 'Alt+Shift+A', alt('a', { shift: true })),
   single('format:line-spacing-increase', 'Alt+Shift+Z', alt('z', { shift: true })),
   single('format:align-left', 'Ctrl+Shift+L', ctrl('l', { shift: true })),
@@ -303,4 +305,3 @@ export function syncShortcutLabels(registry: CommandRegistry, root?: ParentNode 
     shortcutEl.textContent = label;
   }
 }
-

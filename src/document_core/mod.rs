@@ -192,9 +192,7 @@ pub struct ActiveFieldInfo {
 impl DocumentCore {
     fn has_font_substitutions(&self) -> bool {
         self.font_substitution_entries().into_iter().any(
-            |(_, _, _, substituted, resolution_kind)| {
-                substituted && resolution_kind == "substitute"
-            },
+            |(_, _, _, substituted, _)| substituted,
         )
     }
 

@@ -3,7 +3,8 @@
 use super::super::helpers::get_textbox_from_shape;
 use crate::document_core::DocumentCore;
 use crate::error::HwpError;
-use crate::model::control::Control;
+use crate::model::control::{Control, PageNumberPos};
+use crate::model::document::Section;
 use crate::model::event::DocumentEvent;
 use crate::model::page::ColumnDef;
 use crate::model::paragraph::Paragraph;
@@ -1098,6 +1099,126 @@ impl DocumentCore {
         Ok("{\"ok\":true}".to_string())
     }
 
+    /// 현재 위치에서 구역 나누기를 삽입한다.
+    pub fn insert_section_break_native(
+        &mut self,
+        section_idx: usize,
+        para_idx: usize,
+        char_offset: usize,
+    ) -> Result<String, HwpError> {
+        if section_idx >= self.document.sections.len() {
+            return Err(HwpError::RenderError(format!(
+                "구역 인덱스 {} 범위 초과",
+                section_idx
+            )));
+        }
+        if para_idx >= self.document.sections[section_idx].paragraphs.len() {
+            return Err(HwpError::RenderError(format!(
+                "문단 인덱스 {} 범위 초과",
+                para_idx
+            )));
+        }
+
+        self.split_paragraph_native(section_idx, para_idx, char_offset)?;
+        let new_para_idx = para_idx + 1;
+
+        let new_section = {
+            let section = &mut self.document.sections[section_idx];
+            let moved_paragraphs = section.paragraphs.split_off(new_para_idx);
+            section.raw_stream = None;
+            Section {
+                section_def: section.section_def.clone(),
+                paragraphs: moved_paragraphs,
+                raw_stream: None,
+            }
+        };
+
+        let inserted_section_idx = section_idx + 1;
+        self.document
+            .sections
+            .insert(inserted_section_idx, new_section);
+        self.document.doc_properties.section_count = self.document.sections.len() as u16;
+        self.document.sections[inserted_section_idx].raw_stream = None;
+        self.document.doc_properties.caret_list_id = inserted_section_idx as u32;
+        self.document.doc_properties.caret_para_id = 0;
+        self.document.doc_properties.caret_char_pos = 0;
+
+        self.composed = self
+            .document
+            .sections
+            .iter()
+            .map(crate::renderer::composer::compose_section)
+            .collect();
+        self.pagination.clear();
+        self.dirty_sections = vec![true; self.document.sections.len()];
+        self.measured_tables.clear();
+        self.measured_sections.clear();
+        self.dirty_paragraphs.clear();
+        self.para_column_map.clear();
+        self.para_offset = vec![0; self.document.sections.len()];
+        self.overflow_links_cache.borrow_mut().clear();
+        self.paginate_if_needed();
+        self.invalidate_page_tree_cache();
+
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"sectionIdx\":{},\"paraIdx\":0,\"charOffset\":0,\"sectionCount\":{}",
+            inserted_section_idx,
+            self.document.sections.len()
+        )))
+    }
+
+    /// 쪽 번호 위치 컨트롤을 삽입하거나 현재 문단의 기존 컨트롤을 갱신한다.
+    pub fn set_page_number_pos_native(
+        &mut self,
+        section_idx: usize,
+        para_idx: usize,
+        format: u8,
+        position: u8,
+        dash_char: char,
+    ) -> Result<String, HwpError> {
+        if section_idx >= self.document.sections.len() {
+            return Err(HwpError::RenderError(format!(
+                "구역 인덱스 {} 범위 초과",
+                section_idx
+            )));
+        }
+        if para_idx >= self.document.sections[section_idx].paragraphs.len() {
+            return Err(HwpError::RenderError(format!(
+                "문단 인덱스 {} 범위 초과",
+                para_idx
+            )));
+        }
+
+        let safe_position = if position > 10 { 5 } else { position };
+        let safe_dash = if dash_char == '\0' { '-' } else { dash_char };
+        let new_pos = PageNumberPos {
+            format,
+            position: safe_position,
+            dash_char: safe_dash,
+            ..Default::default()
+        };
+
+        let para = &mut self.document.sections[section_idx].paragraphs[para_idx];
+        if let Some(existing) = para.controls.iter_mut().find_map(|ctrl| match ctrl {
+            Control::PageNumberPos(pnp) => Some(pnp),
+            _ => None,
+        }) {
+            *existing = new_pos;
+        } else {
+            para.controls.push(Control::PageNumberPos(new_pos));
+        }
+
+        self.document.sections[section_idx].raw_stream = None;
+        self.rebuild_section(section_idx);
+        self.paginate_if_needed();
+        self.invalidate_page_tree_cache();
+
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"sectionIdx\":{},\"paraIdx\":{},\"format\":{},\"position\":{}",
+            section_idx, para_idx, format, safe_position
+        )))
+    }
+
     /// 문단 병합 (네이티브 에러 타입)
     pub fn merge_paragraph_native(
         &mut self,
@@ -2015,6 +2136,44 @@ impl DocumentCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_insert_section_break_splits_document_sections() {
+        let mut core = DocumentCore::new_empty();
+        core.create_blank_document_native().unwrap();
+        core.insert_text_native(0, 0, 0, "abcdef").unwrap();
+
+        let result = core.insert_section_break_native(0, 0, 3).unwrap();
+
+        assert!(result.contains("\"ok\":true"));
+        assert_eq!(core.document.sections.len(), 2);
+        assert_eq!(core.document.doc_properties.section_count, 2);
+        assert_eq!(core.document.sections[0].paragraphs[0].text, "abc");
+        assert_eq!(core.document.sections[1].paragraphs[0].text, "def");
+    }
+
+    #[test]
+    fn test_set_page_number_pos_inserts_and_updates_control() {
+        let mut core = DocumentCore::new_empty();
+        core.create_blank_document_native().unwrap();
+
+        core.set_page_number_pos_native(0, 0, 0, 5, '-').unwrap();
+        core.set_page_number_pos_native(0, 0, 4, 2, '-').unwrap();
+
+        let page_num_controls: Vec<_> = core.document.sections[0].paragraphs[0]
+            .controls
+            .iter()
+            .filter_map(|ctrl| match ctrl {
+                Control::PageNumberPos(pnp) => Some(pnp),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(page_num_controls.len(), 1);
+        assert_eq!(page_num_controls[0].format, 4);
+        assert_eq!(page_num_controls[0].position, 2);
+        assert_eq!(page_num_controls[0].dash_char, '-');
+    }
 
     #[test]
     fn test_page_overflow_with_enter() {

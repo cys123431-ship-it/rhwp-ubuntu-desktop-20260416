@@ -964,7 +964,9 @@ impl DocumentCore {
                 )
                 .ok_or_else(|| HwpError::RenderError("셀 문단을 찾을 수 없음".to_string()))?;
             let base_id = para.char_shape_id_at(start_offset).unwrap_or(0);
-            let new_id = self.document.find_or_create_char_shape(base_id, &mods);
+            let new_id = mods
+                .char_shape_id
+                .unwrap_or_else(|| self.document.find_or_create_char_shape(base_id, &mods));
 
             // 셀 문단에 범위 적용
             let cell_para = self.get_cell_paragraph_mut(
@@ -1494,7 +1496,9 @@ impl DocumentCore {
         let base_id = self.document.sections[sec_idx].paragraphs[para_idx]
             .char_shape_id_at(start_offset)
             .unwrap_or(0);
-        let new_id = self.document.find_or_create_char_shape(base_id, mods);
+        let new_id = mods
+            .char_shape_id
+            .unwrap_or_else(|| self.document.find_or_create_char_shape(base_id, mods));
         self.document.sections[sec_idx].paragraphs[para_idx].apply_char_shape_range(
             start_offset,
             end_offset,

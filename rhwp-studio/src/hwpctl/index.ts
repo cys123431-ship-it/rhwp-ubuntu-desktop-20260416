@@ -6,7 +6,14 @@
  */
 import { Action } from './action';
 import { ParameterSet } from './parameter-set';
-import { getActionDef, getRegisteredCount, getImplementedCount, getAllActions } from './action-registry';
+import {
+  getActionDef,
+  getRegisteredCount,
+  getImplementedCount,
+  getExecutableCount,
+  getAllActions,
+  getActionStatusCounts,
+} from './action-registry';
 
 // Wave 1~6: Action executor 등록 (import 시 자동 등록)
 import './actions/table';
@@ -27,6 +34,10 @@ export class HwpCtrl {
   private cursorSection = 0;
   private cursorPara = 0;
   private cursorPos = 0;
+  /** hwpctl 직접 실행용 문서 스냅샷 히스토리 */
+  private undoStack: Uint8Array[] = [];
+  private redoStack: Uint8Array[] = [];
+  private readonly historyLimit = 50;
   /** 이벤트 리스너 */
   private listeners: Map<number, Function[]> = new Map();
 
@@ -39,8 +50,90 @@ export class HwpCtrl {
     return this.wasmDoc;
   }
 
+  /** 내부: Studio 입력 핸들러 접근 */
+  getInputHandler(): any | null {
+    return (globalThis as any).__inputHandler ?? null;
+  }
+
+  /** 내부: 현재 커서를 Studio 입력 핸들러 기준으로 동기화 */
+  syncCursorFromInputHandler(): void {
+    const ih = this.getInputHandler();
+    const pos = ih?.getCursorPosition?.() ?? ih?.getPosition?.();
+    if (!pos) return;
+    this.cursorSection = pos.sectionIndex ?? this.cursorSection;
+    this.cursorPara = pos.paragraphIndex ?? this.cursorPara;
+    this.cursorPos = pos.charOffset ?? this.cursorPos;
+  }
+
+  /** 내부: 문서 변경 알림 */
+  notifyDocumentChanged(): void {
+    const ih = this.getInputHandler();
+    if (ih?.triggerAfterEdit) {
+      ih.triggerAfterEdit();
+      this.syncCursorFromInputHandler();
+      return;
+    }
+    (globalThis as any).__eventBus?.emit?.('document-changed');
+  }
+
+  private captureSnapshot(): Uint8Array | null {
+    try {
+      const bytes = this.wasmDoc.exportHwp?.() ?? this.wasmDoc.save?.('hwp');
+      if (!bytes) return null;
+      return new Uint8Array(bytes);
+    } catch (e) {
+      console.warn('[hwpctl] 문서 스냅샷 생성 실패:', e);
+      return null;
+    }
+  }
+
+  private restoreSnapshot(bytes: Uint8Array): boolean {
+    try {
+      this.wasmDoc = new (this.wasmDoc.constructor)(bytes);
+      this.cursorSection = 0;
+      this.cursorPara = 0;
+      this.cursorPos = 0;
+      this.notifyDocumentChanged();
+      return true;
+    } catch (e) {
+      console.error('[hwpctl] 문서 스냅샷 복원 실패:', e);
+      return false;
+    }
+  }
+
+  /** 내부: hwpctl 직접 실행 히스토리에 현재 문서를 저장 */
+  recordUndoSnapshot(): void {
+    const snapshot = this.captureSnapshot();
+    if (!snapshot) return;
+    this.undoStack.push(snapshot);
+    if (this.undoStack.length > this.historyLimit) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  /** 내부: 문서 변경 작업을 undo 스냅샷과 함께 실행 */
+  executeWithUndo(operation: () => boolean): boolean {
+    this.recordUndoSnapshot();
+    let ok = false;
+    try {
+      ok = operation();
+    } catch (e) {
+      console.error('[hwpctl] 문서 변경 작업 실패:', e);
+      ok = false;
+    }
+    if (!ok) {
+      const snapshot = this.undoStack.pop();
+      if (snapshot) this.restoreSnapshot(snapshot);
+      return false;
+    }
+    this.notifyDocumentChanged();
+    return true;
+  }
+
   /** 내부: 현재 커서 위치 */
   getCursor(): { section: number; para: number; pos: number } {
+    this.syncCursorFromInputHandler();
     return { section: this.cursorSection, para: this.cursorPara, pos: this.cursorPos };
   }
 
@@ -51,6 +144,11 @@ export class HwpCtrl {
     try {
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
       this.wasmDoc = new (this.wasmDoc.constructor)(bytes);
+      this.undoStack = [];
+      this.redoStack = [];
+      this.cursorSection = 0;
+      this.cursorPara = 0;
+      this.cursorPos = 0;
       callback?.(true);
       return true;
     } catch (e) {
@@ -62,10 +160,12 @@ export class HwpCtrl {
 
   /** 빈 문서 생성 */
   Clear(): void {
+    this.recordUndoSnapshot();
     this.wasmDoc.createBlankDocument();
     this.cursorSection = 0;
     this.cursorPara = 0;
     this.cursorPos = 0;
+    this.notifyDocumentChanged();
   }
 
   /** HWP 파일로 내보내기 */
@@ -94,6 +194,8 @@ export class HwpCtrl {
       return new Action(this, {
         id: actionId, parameterSetId: null,
         description: '미등록', executor: null,
+        compatibilityStatus: 'unsupported',
+        statusNote: 'rhwp hwpctl 레지스트리에 없는 Action입니다.',
       });
     }
     return new Action(this, def);
@@ -119,16 +221,13 @@ export class HwpCtrl {
 
   /** 텍스트 삽입 */
   InsertText(text: string): boolean {
-    try {
+    return this.executeWithUndo(() => {
       this.wasmDoc.insertText(
         this.cursorSection, this.cursorPara, this.cursorPos, text,
       );
       this.cursorPos += text.length;
       return true;
-    } catch (e) {
-      console.error('[hwpctl] InsertText 실패:', e);
-      return false;
-    }
+    });
   }
 
   /** Action 단순 실행 */
@@ -142,6 +241,15 @@ export class HwpCtrl {
     this.cursorSection = list;
     this.cursorPara = para;
     this.cursorPos = pos;
+    const ih = this.getInputHandler();
+    if (ih?.moveCursorTo) {
+      ih.moveCursorTo({
+        sectionIndex: list,
+        paragraphIndex: para,
+        charOffset: pos,
+      });
+      this.syncCursorFromInputHandler();
+    }
     return true;
   }
 
@@ -166,17 +274,14 @@ export class HwpCtrl {
    * @param controlIdx 표 컨트롤 인덱스 (기본 0)
    */
   SetCellText(tableParaIdx: number, row: number, col: number, text: string, colCount: number, controlIdx = 0): boolean {
-    try {
+    return this.executeWithUndo(() => {
       const cellIdx = row * colCount + col;
       const result = this.wasmDoc.insertTextInCell(
         this.cursorSection, tableParaIdx, controlIdx, cellIdx, 0, 0, text,
       );
       const parsed = JSON.parse(result);
       return parsed.ok === true;
-    } catch (e) {
-      console.error(`[hwpctl] SetCellText(pi=${tableParaIdx}, r=${row}, c=${col}) 실패:`, e);
-      return false;
-    }
+    });
   }
 
   /** 표 셀 텍스트 조회 (행렬 좌표 기반) */
@@ -194,11 +299,14 @@ export class HwpCtrl {
 
   /** 표 셀에서 계산식 실행 */
   EvaluateFormula(tableParaIdx: number, row: number, col: number, formula: string, writeResult = true, controlIdx = 0): any {
+    if (writeResult) this.recordUndoSnapshot();
     try {
       const result = this.wasmDoc.evaluateTableFormula(
         this.cursorSection, tableParaIdx, controlIdx, row, col, formula, writeResult,
       );
-      return JSON.parse(result);
+      const parsed = JSON.parse(result);
+      if (writeResult && parsed.ok) this.notifyDocumentChanged();
+      return parsed;
     } catch (e) {
       console.error(`[hwpctl] EvaluateFormula 실패:`, e);
       return { ok: false, error: String(e) };
@@ -248,14 +356,11 @@ export class HwpCtrl {
 
   /** 필드 텍스트 설정 (한컴 호환: PutFieldText) */
   PutFieldText(field: string, text: string): boolean {
-    try {
+    return this.executeWithUndo(() => {
       const result = this.wasmDoc.setFieldValueByName(field, text);
       const parsed = JSON.parse(result);
       return parsed.ok === true;
-    } catch (e) {
-      console.error(`[hwpctl] PutFieldText("${field}") 실패:`, e);
-      return false;
-    }
+    });
   }
 
   /** 필드 텍스트 조회 (한컴 호환: GetFieldText) */
@@ -308,6 +413,38 @@ export class HwpCtrl {
     return true;
   }
 
+  /** 실행취소 */
+  Undo(): boolean {
+    const ih = this.getInputHandler();
+    if (ih?.canUndo?.() && ih?.performUndo) {
+      ih.performUndo();
+      this.syncCursorFromInputHandler();
+      return true;
+    }
+
+    const snapshot = this.undoStack.pop();
+    if (!snapshot) return false;
+    const current = this.captureSnapshot();
+    if (current) this.redoStack.push(current);
+    return this.restoreSnapshot(snapshot);
+  }
+
+  /** 다시실행 */
+  Redo(): boolean {
+    const ih = this.getInputHandler();
+    if (ih?.canRedo?.() && ih?.performRedo) {
+      ih.performRedo();
+      this.syncCursorFromInputHandler();
+      return true;
+    }
+
+    const snapshot = this.redoStack.pop();
+    if (!snapshot) return false;
+    const current = this.captureSnapshot();
+    if (current) this.undoStack.push(current);
+    return this.restoreSnapshot(snapshot);
+  }
+
   // ── 진행률 추적 ──
 
   /** 등록된 Action 수 */
@@ -318,6 +455,16 @@ export class HwpCtrl {
   /** 구현된 Action 수 */
   static getImplementedActionCount(): number {
     return getImplementedCount();
+  }
+
+  /** 실행 함수가 연결된 Action 수 */
+  static getExecutableActionCount(): number {
+    return getExecutableCount();
+  }
+
+  /** 호환 상태별 Action 수 */
+  static getActionStatusCounts() {
+    return getActionStatusCounts();
   }
 
   /** 전체 Action 목록 (디버깅/테스트용) */

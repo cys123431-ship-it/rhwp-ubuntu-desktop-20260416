@@ -10,6 +10,9 @@ import type { HwpCtrl } from './index';
 /** Action 실행 함수 타입 */
 export type ActionExecutor = (ctrl: HwpCtrl, set: ParameterSet | null) => boolean;
 
+/** 한컴 hwpctl 대비 호환 상태 */
+export type ActionCompatibilityStatus = 'implemented' | 'partial' | 'stub' | 'unsupported';
+
 /** Action 정의 */
 export interface ActionDef {
   /** Action ID */
@@ -20,11 +23,17 @@ export interface ActionDef {
   description: string;
   /** 실행 함수 */
   executor: ActionExecutor | null;
+  /** 한컴 hwpctl 대비 호환 상태 */
+  compatibilityStatus?: ActionCompatibilityStatus;
+  /** 상태 보충 설명 */
+  statusNote?: string;
 }
 
 export class Action {
   readonly ActID: string;
   readonly SetID: string | null;
+  readonly CompatibilityStatus: ActionCompatibilityStatus;
+  readonly StatusNote: string;
   private ctrl: HwpCtrl;
   private def: ActionDef;
 
@@ -33,6 +42,8 @@ export class Action {
     this.def = def;
     this.ActID = def.id;
     this.SetID = def.parameterSetId;
+    this.CompatibilityStatus = def.compatibilityStatus ?? (def.executor ? 'implemented' : 'stub');
+    this.StatusNote = def.statusNote ?? '';
   }
 
   /** Action에 연결된 ParameterSet 생성 */
@@ -61,5 +72,10 @@ export class Action {
     }
     console.warn(`[hwpctl] Action "${this.def.id}" 미구현`);
     return false;
+  }
+
+  /** 한컴 hwpctl 대비 호환 상태 조회 */
+  GetCompatibilityStatus(): ActionCompatibilityStatus {
+    return this.CompatibilityStatus;
   }
 }

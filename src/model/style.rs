@@ -571,6 +571,8 @@ pub struct CharShapeMods {
     pub font_ids: Option<[u16; 7]>,
     /// 글자 테두리/배경 ID (1-based, 0=없음)
     pub border_fill_id: Option<u16>,
+    /// 기존 글자 모양 ID를 직접 적용한다. Undo/Redo 복원처럼 새 CharShape를 만들지 않아야 하는 경로에서 사용한다.
+    pub char_shape_id: Option<u32>,
     /// 강조점 종류 (0~6)
     pub emphasis_dot: Option<u8>,
     /// 밑줄 모양 (0~10, 표 27 선 종류)

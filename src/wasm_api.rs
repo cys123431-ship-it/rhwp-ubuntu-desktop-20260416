@@ -1113,6 +1113,43 @@ impl HwpDocument {
     ///
     /// para_idx의 텍스트가 para_idx-1에 결합되고 para_idx는 삭제된다.
     /// 반환값: JSON `{"ok":true,"paraIdx":<merged_para_idx>,"charOffset":<merge_point>}`
+    /// 현재 위치에서 구역 나누기를 삽입한다.
+    #[wasm_bindgen(js_name = insertSectionBreak)]
+    pub fn insert_section_break(
+        &mut self,
+        section_idx: u32,
+        para_idx: u32,
+        char_offset: u32,
+    ) -> Result<String, JsValue> {
+        self.insert_section_break_native(
+            section_idx as usize,
+            para_idx as usize,
+            char_offset as usize,
+        )
+        .map_err(|e| e.into())
+    }
+
+    /// 쪽 번호 위치 컨트롤을 삽입하거나 갱신한다.
+    #[wasm_bindgen(js_name = setPageNumberPos)]
+    pub fn set_page_number_pos(
+        &mut self,
+        section_idx: u32,
+        para_idx: u32,
+        format: u32,
+        position: u32,
+        dash_char: &str,
+    ) -> Result<String, JsValue> {
+        let dash = dash_char.chars().next().unwrap_or('-');
+        self.set_page_number_pos_native(
+            section_idx as usize,
+            para_idx as usize,
+            format as u8,
+            position as u8,
+            dash,
+        )
+        .map_err(|e| e.into())
+    }
+
     #[wasm_bindgen(js_name = mergeParagraph)]
     pub fn merge_paragraph(&mut self, section_idx: u32, para_idx: u32) -> Result<String, JsValue> {
         self.merge_paragraph_native(section_idx as usize, para_idx as usize)

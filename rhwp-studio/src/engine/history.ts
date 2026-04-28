@@ -2,7 +2,6 @@ import type { WasmBridge } from '@/core/wasm-bridge';
 import type { DocumentPosition } from '@/core/types';
 import type { EditCommand } from './command';
 
-/** 스택 내 모든 명령의 discard()를 호출하여 리소스 해제 */
 function discardAll(stack: EditCommand[], wasm: WasmBridge): void {
   for (const cmd of stack) {
     cmd.discard?.(wasm);
@@ -15,17 +14,15 @@ export class CommandHistory {
   private redoStack: EditCommand[] = [];
   private maxSize = 1000;
 
-  /** 명령 실행 + 히스토리 기록. 실행 후 커서 위치 반환 */
+  /** 명령 실행 후 히스토리에 기록하고 실행 후 커서 위치를 반환한다. */
   execute(command: EditCommand, wasm: WasmBridge): DocumentPosition {
     const cursorAfter = command.execute(wasm);
 
-    // 직전 명령과 병합 시도
     if (this.undoStack.length > 0) {
       const last = this.undoStack[this.undoStack.length - 1];
       const merged = last.mergeWith(command);
       if (merged) {
         this.undoStack[this.undoStack.length - 1] = merged;
-        // redo 스택 정리 (리소스 해제 후 비움)
         discardAll(this.redoStack, wasm);
         this.redoStack = [];
         return cursorAfter;
@@ -33,11 +30,9 @@ export class CommandHistory {
     }
 
     this.undoStack.push(command);
-    // redo 스택 정리 (새 명령 실행 시 redo 불가)
     discardAll(this.redoStack, wasm);
     this.redoStack = [];
 
-    // 크기 제한 — eviction 시 리소스 해제
     if (this.undoStack.length > this.maxSize) {
       const evicted = this.undoStack.shift();
       evicted?.discard?.(wasm);
@@ -46,7 +41,7 @@ export class CommandHistory {
     return cursorAfter;
   }
 
-  /** Undo — 성공 시 커서 위치 반환, 스택 비었으면 null */
+  /** Undo 성공 시 커서 위치를 반환하고, 스택이 비었으면 null을 반환한다. */
   undo(wasm: WasmBridge): DocumentPosition | null {
     const command = this.undoStack.pop();
     if (!command) return null;
@@ -56,7 +51,7 @@ export class CommandHistory {
     return cursorAfter;
   }
 
-  /** Redo — 성공 시 커서 위치 반환, 스택 비었으면 null */
+  /** Redo 성공 시 커서 위치를 반환하고, 스택이 비었으면 null을 반환한다. */
   redo(wasm: WasmBridge): DocumentPosition | null {
     const command = this.redoStack.pop();
     if (!command) return null;
@@ -66,9 +61,16 @@ export class CommandHistory {
     return cursorAfter;
   }
 
-  /** execute() 없이 히스토리에만 기록 (IME compositionend용 — 텍스트가 이미 문서에 있는 경우) */
+  peekUndoType(): string | null {
+    return this.undoStack[this.undoStack.length - 1]?.type ?? null;
+  }
+
+  peekRedoType(): string | null {
+    return this.redoStack[this.redoStack.length - 1]?.type ?? null;
+  }
+
+  /** execute() 없이 히스토리에만 기록한다. IME compositionend처럼 이미 문서에 반영된 작업에 사용한다. */
   recordWithoutExecute(command: EditCommand, wasm?: WasmBridge): void {
-    // 직전 명령과 병합 시도
     if (this.undoStack.length > 0) {
       const last = this.undoStack[this.undoStack.length - 1];
       const merged = last.mergeWith(command);
@@ -97,7 +99,7 @@ export class CommandHistory {
   canUndo(): boolean { return this.undoStack.length > 0; }
   canRedo(): boolean { return this.redoStack.length > 0; }
 
-  /** 히스토리 초기화 (문서 로드 시). wasm이 있으면 스냅샷 리소스도 해제. */
+  /** 문서 로드 시 히스토리와 스냅샷 리소스를 정리한다. */
   clear(wasm?: WasmBridge): void {
     if (wasm) {
       discardAll(this.undoStack, wasm);

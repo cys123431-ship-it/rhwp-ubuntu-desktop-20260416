@@ -1,9 +1,55 @@
 import type { CommandDef } from '../types';
+import type { CharProperties, ParaProperties } from '@/core/types';
 import { FieldEditDialog } from '@/ui/field-edit-dialog';
 import { FindDialog } from '@/ui/find-dialog';
 import { GotoDialog } from '@/ui/goto-dialog';
 
 let findDialogInstance: FindDialog | null = null;
+
+type FormatClipboard = {
+  char: Partial<CharProperties>;
+  para: Partial<ParaProperties>;
+};
+
+let copiedFormat: FormatClipboard | null = null;
+
+function pickDefined<T extends Record<string, unknown>>(source: T, keys: string[]): Partial<T> {
+  const result: Partial<T> = {};
+  for (const key of keys) {
+    if (source[key] !== undefined) {
+      result[key as keyof T] = source[key] as T[keyof T];
+    }
+  }
+  return result;
+}
+
+function copyCurrentFormat(char: CharProperties, para: ParaProperties): FormatClipboard {
+  return {
+    char: pickDefined(char as Record<string, unknown>, [
+      'charShapeId', 'fontId', 'fontIds', 'fontSize',
+      'bold', 'italic', 'underline', 'strikethrough',
+      'textColor', 'shadeColor', 'emboss', 'engrave', 'outlineType',
+      'shadowType', 'shadowColor', 'shadowOffsetX', 'shadowOffsetY',
+      'subscript', 'superscript', 'underlineType', 'underlineColor',
+      'underlineShape', 'strikeColor', 'strikeShape', 'emphasisDot',
+      'ratios', 'spacings', 'relativeSizes', 'charOffsets', 'kerning',
+      'borderFillId', 'borderLeft', 'borderRight', 'borderTop', 'borderBottom',
+      'fillType', 'fillColor', 'patternColor', 'patternType',
+    ]) as Partial<CharProperties>,
+    para: pickDefined(para as Record<string, unknown>, [
+      'alignment', 'lineSpacing', 'lineSpacingType',
+      'marginLeft', 'marginRight', 'indent',
+      'spacingBefore', 'spacingAfter',
+      'headType', 'paraLevel', 'numberingId',
+      'widowOrphan', 'keepWithNext', 'keepLines', 'pageBreakBefore',
+      'fontLineHeight', 'singleLine', 'autoSpaceKrEn', 'autoSpaceKrNum',
+      'verticalAlign', 'englishBreakUnit', 'koreanBreakUnit',
+      'tabAutoLeft', 'tabAutoRight', 'tabStops', 'defaultTabSpacing',
+      'borderFillId', 'borderLeft', 'borderRight', 'borderTop', 'borderBottom',
+      'fillType', 'fillColor', 'patternColor', 'patternType', 'borderSpacing',
+    ]) as Partial<ParaProperties>,
+  };
+}
 
 export const editCommands: CommandDef[] = [
   {
@@ -63,9 +109,21 @@ export const editCommands: CommandDef[] = [
     label: '모양 복사',
     icon: 'icon-format-copy',
     shortcutLabel: 'Ctrl+Alt+C',
-    canExecute: () => false,
-    execute() {
-      // TODO
+    canExecute: (ctx) => ctx.hasDocument,
+    execute(services) {
+      const ih = services.getInputHandler();
+      if (!ih) return;
+
+      const selection = ih.getSelection();
+      if (copiedFormat && selection) {
+        ih.applyCharPropsToRange(selection.start, selection.end, copiedFormat.char);
+        ih.applyParaPropsToRange(selection.start, selection.end, copiedFormat.para);
+        copiedFormat = null;
+        services.eventBus.emit('document-changed');
+        return;
+      }
+
+      copiedFormat = copyCurrentFormat(ih.getCharProperties(), ih.getParaProperties());
     },
   },
   {

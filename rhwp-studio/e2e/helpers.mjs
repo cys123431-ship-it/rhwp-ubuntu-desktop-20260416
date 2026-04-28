@@ -10,9 +10,13 @@
  *   node e2e/text-flow.test.mjs --mode=headless  # headless Chrome
  */
 import puppeteer from 'puppeteer-core';
+import path from 'node:path';
 import { TestReporter } from './report-generator.mjs';
 
-const CHROME_PATH = '/home/edward/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
+const DEFAULT_CHROME_PATH = process.platform === 'win32'
+  ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+  : '/home/edward/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome';
+const CHROME_PATH = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH || DEFAULT_CHROME_PATH;
 const CHROME_CDP = process.env.CHROME_CDP || 'http://172.21.192.1:19222';
 const VITE_URL = process.env.VITE_URL || 'http://localhost:7700';
 const REPORT_DIR = '../output/e2e';
@@ -276,7 +280,7 @@ export function assert(condition, message) {
  */
 function getReportFilename() {
   const scriptPath = process.argv[1] || 'unknown';
-  const basename = scriptPath.split('/').pop().replace(/\.test\.mjs$/, '');
+  const basename = path.basename(scriptPath).replace(/\.test\.mjs$/, '');
   return `${basename}-report.html`;
 }
 

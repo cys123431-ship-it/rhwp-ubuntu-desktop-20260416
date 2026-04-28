@@ -93,6 +93,13 @@ export class CursorState {
     this.anchor = null;
   }
 
+  /** 지정한 범위를 선택 상태로 복원한다 */
+  setSelection(start: DocumentPosition, end: DocumentPosition): void {
+    this.anchor = { ...start };
+    this.position = { ...end };
+    this.updateRect();
+  }
+
   /** 두 DocumentPosition을 비교한다 (-1: a<b, 0: a==b, 1: a>b) */
   static comparePositions(a: DocumentPosition, b: DocumentPosition): number {
     // 본문↔셀 혼합 비교: 셀 컨텍스트가 다르면 parentParaIndex 기준으로 비교

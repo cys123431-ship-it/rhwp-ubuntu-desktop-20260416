@@ -1295,18 +1295,30 @@ export class InputHandler {
 
   /** Undo 처리 */
   private handleUndo(): void {
+    const commandType = this.history.peekUndoType();
+    const selection = commandType === 'applyCharFormat' ? this.cursor.getSelectionOrdered() : null;
     const newPos = this.history.undo(this.wasm);
     if (newPos) {
-      this.cursor.moveTo(newPos);
+      if (commandType === 'applyCharFormat' && selection) {
+        this.cursor.setSelection(selection.start, selection.end);
+      } else {
+        this.cursor.moveTo(newPos);
+      }
       this.afterEdit();
     }
   }
 
   /** Redo 처리 */
   private handleRedo(): void {
+    const commandType = this.history.peekRedoType();
+    const selection = commandType === 'applyCharFormat' ? this.cursor.getSelectionOrdered() : null;
     const newPos = this.history.redo(this.wasm);
     if (newPos) {
-      this.cursor.moveTo(newPos);
+      if (commandType === 'applyCharFormat' && selection) {
+        this.cursor.setSelection(selection.start, selection.end);
+      } else {
+        this.cursor.moveTo(newPos);
+      }
       this.afterEdit();
     }
   }

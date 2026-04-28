@@ -340,6 +340,9 @@ pub(crate) fn parse_char_shape_mods(json: &str) -> crate::model::style::CharShap
     if let Some(v) = json_u16(json, "fontId") {
         mods.font_id = Some(v);
     }
+    if let Some(v) = json_u16(json, "charShapeId") {
+        mods.char_shape_id = Some(v as u32);
+    }
     if let Some(v) = json_color(json, "textColor") {
         mods.text_color = Some(v);
     }
@@ -1419,5 +1422,17 @@ pub(crate) fn border_fills_equal(
         (Some(sa), Some(sb)) => sa.background_color == sb.background_color,
         (None, None) => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_char_shape_mods;
+
+    #[test]
+    fn parses_char_shape_id_for_undo_restore() {
+        let mods = parse_char_shape_mods(r#"{"charShapeId":7,"fontSize":1100}"#);
+        assert_eq!(mods.char_shape_id, Some(7));
+        assert_eq!(mods.base_size, Some(1100));
     }
 }
