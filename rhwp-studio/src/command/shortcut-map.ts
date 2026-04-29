@@ -2,6 +2,7 @@ import type { CommandRegistry } from './registry';
 
 export interface ShortcutStroke {
   key: string;
+  code?: string;
   ctrl?: boolean;
   shift?: boolean;
   alt?: boolean;
@@ -83,6 +84,16 @@ const plain = (key: string, extra: Omit<ShortcutStroke, 'key'> = {}): ShortcutSt
   ...extra,
 });
 
+const keypad = (
+  key: string,
+  code: string,
+  extra: Omit<ShortcutStroke, 'key' | 'code'> = {},
+): ShortcutStroke => ({
+  key,
+  code,
+  ...extra,
+});
+
 export const hancomShortcuts: ShortcutBinding[] = [
   single('file:new-doc', 'Alt+N', alt('n')),
   single('file:open', 'Ctrl+O', ctrl('o')),
@@ -150,8 +161,8 @@ export const hancomShortcuts: ShortcutBinding[] = [
   chord('view:zoom-fit-page', 'Ctrl+G,P', ctrl('g'), plain('p')),
   chord('view:zoom-fit-width', 'Ctrl+G,W', ctrl('g'), plain('w')),
   chord('view:zoom-100', 'Ctrl+G,Q', ctrl('g'), plain('q')),
-  single('view:zoom-in', 'Shift+Num +', plain('+', { shift: true })),
-  single('view:zoom-out', 'Shift+Num -', plain('-', { shift: true })),
+  single('view:zoom-in', 'Shift+Num +', keypad('+', 'NumpadAdd', { shift: true })),
+  single('view:zoom-out', 'Shift+Num -', keypad('-', 'NumpadSubtract', { shift: true })),
   chord('view:border-transparent', 'Alt+V,T', alt('v'), plain('t')),
 ];
 
@@ -177,6 +188,7 @@ function eventMatchesStroke(e: KeyboardEvent, stroke: ShortcutStroke): boolean {
   const ctrlOrMeta = e.ctrlKey || e.metaKey;
   return (
     e.key.toLowerCase() === stroke.key
+    && (!stroke.code || e.code === stroke.code)
     && ((stroke.ctrl ?? false) === ctrlOrMeta)
     && ((stroke.shift ?? false) === e.shiftKey)
     && ((stroke.alt ?? false) === e.altKey)

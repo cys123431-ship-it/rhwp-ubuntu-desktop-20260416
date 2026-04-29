@@ -54,6 +54,14 @@ assert(hasBinding('format:font-size-increase', 'Ctrl+]'), 'font-size increase ke
 assert(hasBinding('format:font-size-increase', 'Alt+Shift+E'), 'font-size increase has Hancom Alt+Shift+E alias');
 assert(hasBinding('format:font-size-decrease', 'Ctrl+['), 'font-size decrease keeps Ctrl+[ alias');
 assert(hasBinding('format:font-size-decrease', 'Alt+Shift+R'), 'font-size decrease has Hancom Alt+Shift+R alias');
+assert(
+  shortcutSource.includes("keypad('+', 'NumpadAdd', { shift: true })"),
+  'zoom-in Shift+Num + is limited to the numeric keypad add key',
+);
+assert(
+  !shortcutSource.includes("plain('+', { shift: true })"),
+  'plain Shift+= remains available for typing +',
+);
 
 const orphanBindings = bindings.filter((binding) => !commandIds.has(binding.commandId));
 assert(
