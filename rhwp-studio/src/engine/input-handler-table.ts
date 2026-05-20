@@ -65,13 +65,12 @@ export function updateResizeDrag(this: any, e: MouseEvent): void {
   const zoom = this.viewportManager.getZoom();
   const scrollContent = this.container.querySelector('#scroll-content');
   if (!scrollContent) return;
-  const contentRect = scrollContent.getBoundingClientRect();
-  const contentX = e.clientX - contentRect.left;
-  const contentY = e.clientY - contentRect.top;
+  const contentX = this.viewportManager.getContentX(e.clientX);
+    const contentY = this.viewportManager.getContentY(e.clientY);
   const pageIdx = this.resizeDragState.edge.pageIndex;
   const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
   const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-  const pageLeft = (scrollContent.clientWidth - pageDisplayWidth) / 2;
+  const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
   const pageX = (contentX - pageLeft) / zoom;
   const pageY = (contentY - pageOffset) / zoom;
 
@@ -102,13 +101,12 @@ export function finishResizeDrag(this: any, e: MouseEvent): void {
     this.cleanupResizeDrag();
     return;
   }
-  const contentRect = scrollContent.getBoundingClientRect();
-  const contentX = e.clientX - contentRect.left;
-  const contentY = e.clientY - contentRect.top;
+  const contentX = this.viewportManager.getContentX(e.clientX);
+    const contentY = this.viewportManager.getContentY(e.clientY);
   const pageIdx = state.edge.pageIndex;
   const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
   const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-  const pageLeft = (scrollContent.clientWidth - pageDisplayWidth) / 2;
+  const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
   const pageX = (contentX - pageLeft) / zoom;
   const pageY = (contentY - pageOffset) / zoom;
 
@@ -388,13 +386,12 @@ export function updateMoveDrag(this: any, e: MouseEvent): void {
   const zoom = this.viewportManager.getZoom();
   const sc = this.container.querySelector('#scroll-content');
   if (!sc) return;
-  const cr = sc.getBoundingClientRect();
-  const cx = e.clientX - cr.left;
-  const cy = e.clientY - cr.top;
+  const cx = this.viewportManager.getContentX(e.clientX);
+    const cy = this.viewportManager.getContentY(e.clientY);
   const pi = this.virtualScroll.getPageAtY(cy);
   const po = this.virtualScroll.getPageOffset(pi);
   const pw = this.virtualScroll.getPageWidth(pi);
-  const pl = (sc.clientWidth - pw) / 2;
+  const pl = (this.viewportManager.getContentWidth() - pw) / 2;
   const px = (cx - pl) / zoom;
   const py = (cy - po) / zoom;
 

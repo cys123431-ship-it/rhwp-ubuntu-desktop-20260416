@@ -4,7 +4,7 @@ import { WasmBridge } from '@/core/wasm-bridge';
 /** 커서 상태를 관리한다 */
 export class CursorState {
   private position: DocumentPosition = { sectionIndex: 0, paragraphIndex: 0, charOffset: 0 };
-  private rect: CursorRect | null = null;
+  public rect: CursorRect | null = null;
 
   /** 수직 이동 시 원래 X 좌표를 기억 (§6.4.4 preferred X) */
   private preferredX: number | null = null;

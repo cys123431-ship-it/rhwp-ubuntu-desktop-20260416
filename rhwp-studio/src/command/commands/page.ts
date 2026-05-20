@@ -21,7 +21,7 @@ function enterHeaderFooterEditing(
 ): void {
   const ih = services.getInputHandler();
   if (!ih) return;
-  const cursor = (ih as any).cursor;
+  const cursor = ih.cursor;
   if (!cursor) return;
 
   // 현재 보고 있는 페이지 기준으로 머리말/꼬리말이 있는 페이지 탐색
@@ -56,8 +56,8 @@ function enterHeaderFooterEditing(
   }
 
   services.eventBus.emit('headerFooterModeChanged', isHeader ? 'header' : 'footer');
-  (ih as any).updateCaret?.();
-  (ih as any).textarea?.focus();
+  ih.updateCaret?.();
+  ih.textarea?.focus();
 }
 
 /** 머리말/꼬리말 편집 중 필드 마커를 삽입하는 공통 함수 */
@@ -67,7 +67,7 @@ function insertHfField(
 ): void {
   const ih = services.getInputHandler();
   if (!ih) return;
-  const cursor = (ih as any).cursor;
+  const cursor = ih.cursor;
   if (!cursor || !cursor.isInHeaderFooter()) return;
   const isHeader = cursor.headerFooterMode === 'header';
   try {
@@ -78,8 +78,8 @@ function insertHfField(
     if (result.ok && result.charOffset !== undefined) {
       cursor.setHfCursorPosition(cursor.hfParaIdx, result.charOffset);
     }
-    (ih as any).afterEdit?.();
-    (ih as any).updateCaret?.();
+    ih.afterEdit?.();
+    ih.updateCaret?.();
   } catch (e) {
     console.warn('[page] 필드 삽입 실패:', e);
   }
@@ -92,7 +92,7 @@ function navigateHeaderFooter(
 ): void {
   const ih = services.getInputHandler();
   if (!ih) return;
-  const cursor = (ih as any).cursor;
+  const cursor = ih.cursor;
   if (!cursor || !cursor.isInHeaderFooter()) return;
 
   const currentPage = cursor.rect?.pageIndex ?? 0;
@@ -109,8 +109,8 @@ function navigateHeaderFooter(
     result.pageIndex!,
   );
   services.eventBus.emit('headerFooterModeChanged', result.isHeader ? 'header' : 'footer');
-  (ih as any).updateCaret?.();
-  (ih as any).textarea?.focus();
+  ih.updateCaret?.();
+  ih.textarea?.focus();
 }
 
 /** 머리말/꼬리말 마당 템플릿 적용 공통 함수 */
@@ -122,7 +122,7 @@ function applyHfTemplate(
 ): void {
   const ih = services.getInputHandler();
   if (!ih) return;
-  const cursor = (ih as any).cursor;
+  const cursor = ih.cursor;
   // 현재 편집 중이면 종료
   let sectionIdx: number;
   if (cursor?.isInHeaderFooter()) {
@@ -155,10 +155,10 @@ function applyHfTemplate(
   } catch (e) {
     console.warn('[page] 마당 적용 실패:', e);
   }
-  (ih as any).afterEdit?.();
-  (ih as any).updateCaret?.();
+  ih.afterEdit?.();
+  ih.updateCaret?.();
   // 메뉴 닫기 후 포커스가 유실될 수 있으므로 지연 포커스
-  const textarea = (ih as any).textarea;
+  const textarea = ih.textarea;
   textarea?.focus();
   setTimeout(() => textarea?.focus(), 50);
 }
@@ -172,7 +172,7 @@ export const pageCommands: CommandDef[] = [
     canExecute: (ctx) => ctx.hasDocument,
     execute(services) {
       const ih = services.getInputHandler();
-      const cursor = ih ? (ih as any).cursor : null;
+      const cursor = ih ? ih.cursor : null;
       const sectionIdx = cursor?.getPosition()?.sectionIndex ?? 0;
       const dialog = new PageSetupDialog(services.wasm, services.eventBus, sectionIdx);
       dialog.show();
@@ -204,7 +204,7 @@ export const pageCommands: CommandDef[] = [
     execute(services) {
       const ih = services.getInputHandler();
       if (!ih) return;
-      const cursor = (ih as any).cursor;
+      const cursor = ih.cursor;
       if (!cursor || !cursor.isInHeaderFooter()) return;
       // 현재 보고 있는 페이지 기억
       const hfPage = cursor.rect?.pageIndex ?? 0;
@@ -220,8 +220,8 @@ export const pageCommands: CommandDef[] = [
           cursor.moveTo(hit);
         }
       } catch { /* hitTest 실패 시 기존 위치 유지 */ }
-      (ih as any).afterEdit?.();
-      (ih as any).textarea?.focus();
+      ih.afterEdit?.();
+      ih.textarea?.focus();
     },
   },
   // ─── 머리말/꼬리말 지우기 ──────────────────────
@@ -232,7 +232,7 @@ export const pageCommands: CommandDef[] = [
     execute(services) {
       const ih = services.getInputHandler();
       if (!ih) return;
-      const cursor = (ih as any).cursor;
+      const cursor = ih.cursor;
       if (!cursor || !cursor.isInHeaderFooter()) return;
       const sectionIdx = cursor.hfSectionIdx;
       const isHeader = cursor.headerFooterMode === 'header';
@@ -246,8 +246,8 @@ export const pageCommands: CommandDef[] = [
       } catch (e) {
         console.warn('[page] 머리말/꼬리말 삭제 실패:', e);
       }
-      (ih as any).afterEdit?.();
-      (ih as any).textarea?.focus();
+      ih.afterEdit?.();
+      ih.textarea?.focus();
     },
   },
   // ─── 머리말/꼬리말 이전/다음 이동 ─────────────────
@@ -276,7 +276,7 @@ export const pageCommands: CommandDef[] = [
     execute(services) {
       const ih = services.getInputHandler();
       if (!ih) return;
-      const cursor = (ih as any).cursor;
+      const cursor = ih.cursor;
       if (!cursor || !cursor.isInHeaderFooter()) return;
       const isHeader = cursor.headerFooterMode === 'header';
       const pageIndex = cursor.rect?.pageIndex ?? 0;
@@ -286,8 +286,8 @@ export const pageCommands: CommandDef[] = [
       } catch (e) {
         console.warn('[page] 감추기 토글 실패:', e);
       }
-      (ih as any).afterEdit?.();
-      (ih as any).updateCaret?.();
+      ih.afterEdit?.();
+      ih.updateCaret?.();
     },
   },
   // ─── 머리말/꼬리말 필드 삽입 ────────────────────
@@ -435,7 +435,7 @@ export const pageCommands: CommandDef[] = [
     execute(services) {
       const ih = services.getInputHandler();
       if (!ih) return;
-      const cursor = (ih as any).cursor;
+      const cursor = ih.cursor;
       const sectionIdx = cursor?.getPosition()?.sectionIndex ?? 0;
       const dialog = new SectionSettingsDialog(services.wasm, services.eventBus, sectionIdx);
       dialog.show();

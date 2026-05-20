@@ -22,4 +22,21 @@ export default defineConfig({
       allow: ['..'],
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+          if (id.includes('/src/ui/')) {
+            return 'ui-dialogs';
+          }
+          if (id.includes('/src/engine/')) {
+            return 'engine';
+          }
+        }
+      }
+    }
+  }
 });
