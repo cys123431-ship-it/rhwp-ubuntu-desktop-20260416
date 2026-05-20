@@ -81,6 +81,7 @@ pub struct FontSubstitutionEntry {
     pub original: String,
     pub resolved: String,
     pub substituted: bool,
+    pub resolution_kind: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,9 +191,9 @@ pub struct ActiveFieldInfo {
 
 impl DocumentCore {
     fn has_font_substitutions(&self) -> bool {
-        self.font_substitution_entries()
-            .into_iter()
-            .any(|(_, _, _, substituted)| substituted)
+        self.font_substitution_entries().into_iter().any(
+            |(_, _, _, substituted, _)| substituted,
+        )
     }
 
     fn compatibility_issue_entries(&self) -> Vec<(&'static str, &'static str, String)> {
@@ -237,7 +238,21 @@ impl DocumentCore {
         issues
     }
 
-    fn font_substitution_entries(&self) -> Vec<(String, String, String, bool)> {
+    fn classify_font_resolution(original: &str, resolved: &str) -> &'static str {
+        if original == resolved {
+            return "exact";
+        }
+
+        match (original, resolved) {
+            ("한컴바탕", "함초롬바탕")
+            | ("한컴돋움", "함초롬돋움")
+            | ("새바탕", "함초롬바탕")
+            | ("새돋움", "함초롬돋움") => "alias",
+            _ => "substitute",
+        }
+    }
+
+    fn font_substitution_entries(&self) -> Vec<(String, String, String, bool, &'static str)> {
         use crate::renderer::style_resolver::resolve_font_substitution;
 
         let lang_names = [
@@ -251,11 +266,13 @@ impl DocumentCore {
                     .unwrap_or(&font.name)
                     .to_string();
                 let substituted = resolved != font.name;
+                let resolution_kind = Self::classify_font_resolution(&font.name, &resolved);
                 entries.insert((
                     lang_names.get(lang_idx).unwrap_or(&"hangul").to_string(),
                     font.name.clone(),
                     resolved,
                     substituted,
+                    resolution_kind,
                 ));
             }
         }
@@ -399,13 +416,15 @@ impl DocumentCore {
                         "\"lang\":\"{}\",",
                         "\"original\":\"{}\",",
                         "\"resolved\":\"{}\",",
-                        "\"substituted\":{}",
+                        "\"substituted\":{},",
+                        "\"resolutionKind\":\"{}\"",
                         "}}"
                     ),
                     json_escape(&item.lang),
                     json_escape(&item.original),
                     json_escape(&item.resolved),
                     item.substituted,
+                    item.resolution_kind,
                 )
             })
             .collect::<Vec<_>>()
@@ -441,14 +460,15 @@ impl DocumentCore {
             items: self
                 .font_substitution_entries()
                 .into_iter()
-                .map(
-                    |(lang, original, resolved, substituted)| FontSubstitutionEntry {
+                .map(|(lang, original, resolved, substituted, resolution_kind)| {
+                    FontSubstitutionEntry {
                         lang,
                         original,
                         resolved,
                         substituted,
-                    },
-                )
+                        resolution_kind,
+                    }
+                })
                 .collect(),
         }
     }

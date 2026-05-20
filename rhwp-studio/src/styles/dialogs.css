@@ -53,6 +53,8 @@
 
 .dialog-body {
   padding: 12px;
+  max-height: 65vh;
+  overflow-y: auto;
 }
 
 .dialog-section {
@@ -278,6 +280,38 @@
   color: #444;
   line-height: 1.6;
   margin-bottom: 16px;
+  text-align: left;
+}
+
+.about-release-title {
+  font-size: var(--font-size-base);
+  font-weight: bold;
+  color: #2c3e6b;
+  margin-bottom: 6px;
+  text-align: left;
+}
+
+.about-release-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  text-align: left;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--color-text);
+}
+
+.about-release-list li {
+  margin-bottom: 3px;
+}
+
+.about-release-note {
+  margin-bottom: 16px;
+  padding: 8px 10px;
+  border-left: 3px solid #d0d4e2;
+  background: #fafbfe;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
   text-align: left;
 }
 

@@ -4,13 +4,21 @@
  * 312개 Action의 등록 테이블. Wave별로 executor가 추가된다.
  * 미구현 Action은 executor=null로 등록되어 console.warn만 출력.
  */
-import type { ActionDef } from './action';
+import type { ActionCompatibilityStatus, ActionDef } from './action';
 
 const registry: Map<string, ActionDef> = new Map();
 
+function normalizeActionDef(def: ActionDef): ActionDef {
+  return {
+    ...def,
+    compatibilityStatus: def.compatibilityStatus ?? (def.executor ? 'implemented' : 'stub'),
+    statusNote: def.statusNote ?? '',
+  };
+}
+
 /** Action 정의 등록 */
 export function registerAction(def: ActionDef): void {
-  registry.set(def.id, def);
+  registry.set(def.id, normalizeActionDef(def));
 }
 
 /** Action 정의 조회 */
@@ -23,8 +31,15 @@ export function getRegisteredCount(): number {
   return registry.size;
 }
 
-/** 구현된 Action 수 (executor가 있는 것) */
+/** 한컴 호환 완료 Action 수 */
 export function getImplementedCount(): number {
+  let count = 0;
+  registry.forEach(def => { if (def.compatibilityStatus === 'implemented') count++; });
+  return count;
+}
+
+/** 실행 함수가 연결된 Action 수 */
+export function getExecutableCount(): number {
   let count = 0;
   registry.forEach(def => { if (def.executor) count++; });
   return count;
@@ -35,6 +50,20 @@ export function getAllActions(): ActionDef[] {
   const result: ActionDef[] = [];
   registry.forEach(def => result.push(def));
   return result;
+}
+
+/** 호환 상태별 Action 수 */
+export function getActionStatusCounts(): Record<ActionCompatibilityStatus, number> {
+  const counts: Record<ActionCompatibilityStatus, number> = {
+    implemented: 0,
+    partial: 0,
+    stub: 0,
+    unsupported: 0,
+  };
+  registry.forEach((def) => {
+    counts[def.compatibilityStatus ?? 'stub'] += 1;
+  });
+  return counts;
 }
 
 // ── 기본 Action 등록 (stub — executor 없음) ──
@@ -73,5 +102,12 @@ const STUB_ACTIONS: [string, string | null, string][] = [
 ];
 
 for (const [id, setId, desc] of STUB_ACTIONS) {
-  registerAction({ id, parameterSetId: setId, description: desc, executor: null });
+  registerAction({
+    id,
+    parameterSetId: setId,
+    description: desc,
+    executor: null,
+    compatibilityStatus: 'stub',
+    statusNote: '등록만 되어 있으며 한컴 호환 동작은 아직 연결되지 않았습니다.',
+  });
 }

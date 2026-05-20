@@ -17,7 +17,7 @@ function executeTableInsertRowColumn(ctrl: HwpCtrl, set: ParameterSet | null): b
   const cursor = ctrl.getCursor();
   const type = set?.GetItem('Type') ?? 0; // 0=행, 1=열
 
-  try {
+  return ctrl.executeWithUndo(() => {
     let result: string;
     if (type === 1) {
       // 열 삽입
@@ -27,10 +27,7 @@ function executeTableInsertRowColumn(ctrl: HwpCtrl, set: ParameterSet | null): b
       result = doc.insertTableRow(cursor.section, cursor.para, 0, 0, true);
     }
     return JSON.parse(result).ok === true;
-  } catch (e) {
-    console.error('[hwpctl] TableInsertRowColumn 실패:', e);
-    return false;
-  }
+  });
 }
 
 function executeTableDeleteRowColumn(ctrl: HwpCtrl, set: ParameterSet | null): boolean {
@@ -38,7 +35,7 @@ function executeTableDeleteRowColumn(ctrl: HwpCtrl, set: ParameterSet | null): b
   const cursor = ctrl.getCursor();
   const type = set?.GetItem('Type') ?? 0; // 0=행, 1=열
 
-  try {
+  return ctrl.executeWithUndo(() => {
     let result: string;
     if (type === 1) {
       result = doc.deleteTableColumn(cursor.section, cursor.para, 0, 0);
@@ -46,10 +43,7 @@ function executeTableDeleteRowColumn(ctrl: HwpCtrl, set: ParameterSet | null): b
       result = doc.deleteTableRow(cursor.section, cursor.para, 0, 0);
     }
     return JSON.parse(result).ok === true;
-  } catch (e) {
-    console.error('[hwpctl] TableDeleteRowColumn 실패:', e);
-    return false;
-  }
+  });
 }
 
 /**
@@ -61,13 +55,10 @@ function executeTableSplitCell(ctrl: HwpCtrl, set: ParameterSet | null): boolean
   const doc = ctrl.getWasmDoc();
   const cursor = ctrl.getCursor();
 
-  try {
+  return ctrl.executeWithUndo(() => {
     const result = doc.splitTableCell(cursor.section, cursor.para, 0, 0, 0);
     return JSON.parse(result).ok === true;
-  } catch (e) {
-    console.error('[hwpctl] TableSplitCell 실패:', e);
-    return false;
-  }
+  });
 }
 
 /**
@@ -79,15 +70,12 @@ function executeCellBorderFill(ctrl: HwpCtrl, set: ParameterSet | null): boolean
   const doc = ctrl.getWasmDoc();
   const cursor = ctrl.getCursor();
 
-  try {
+  return ctrl.executeWithUndo(() => {
     // 현재는 기본 스타일(borderFillId=1) 적용
     const styleId = set.GetItem('BorderFillId') ?? 1;
     const result = doc.applyCellStyle(cursor.section, cursor.para, 0, 0, 0, styleId);
     return JSON.parse(result).ok === true;
-  } catch (e) {
-    console.error('[hwpctl] CellBorderFill 실패:', e);
-    return false;
-  }
+  });
 }
 
 /**
@@ -100,8 +88,8 @@ function executeTablePropertyDialog(ctrl: HwpCtrl, set: ParameterSet | null): bo
 }
 
 // Action 등록
-registerAction({ id: 'TableInsertRowColumn', parameterSetId: 'TableInsertLine', description: '줄/칸 삽입', executor: executeTableInsertRowColumn });
-registerAction({ id: 'TableDeleteRowColumn', parameterSetId: 'TableDeleteLine', description: '줄/칸 삭제', executor: executeTableDeleteRowColumn });
-registerAction({ id: 'TableSplitCell', parameterSetId: 'TableSplitCell', description: '셀 나누기', executor: executeTableSplitCell });
-registerAction({ id: 'CellBorderFill', parameterSetId: 'CellBorderFill', description: '셀 테두리/배경', executor: executeCellBorderFill });
-registerAction({ id: 'TablePropertyDialog', parameterSetId: 'ShapeObject', description: '표 고치기', executor: executeTablePropertyDialog });
+registerAction({ id: 'TableInsertRowColumn', parameterSetId: 'TableInsertLine', description: '줄/칸 삽입', executor: executeTableInsertRowColumn, compatibilityStatus: 'partial', statusNote: '현재 커서 표의 기본 행/열 삽입만 매핑합니다.' });
+registerAction({ id: 'TableDeleteRowColumn', parameterSetId: 'TableDeleteLine', description: '줄/칸 삭제', executor: executeTableDeleteRowColumn, compatibilityStatus: 'partial', statusNote: '현재 커서 표의 기본 행/열 삭제만 매핑합니다.' });
+registerAction({ id: 'TableSplitCell', parameterSetId: 'TableSplitCell', description: '셀 나누기', executor: executeTableSplitCell, compatibilityStatus: 'partial', statusNote: '기본 셀 나누기 API만 호출합니다.' });
+registerAction({ id: 'CellBorderFill', parameterSetId: 'CellBorderFill', description: '셀 테두리/배경', executor: executeCellBorderFill, compatibilityStatus: 'partial', statusNote: 'BorderFillId 기반 기본 스타일 적용만 연결되어 있습니다.' });
+registerAction({ id: 'TablePropertyDialog', parameterSetId: 'ShapeObject', description: '표 고치기', executor: executeTablePropertyDialog, compatibilityStatus: 'stub', statusNote: '대화상자 호환 Action은 아직 미구현입니다.' });

@@ -23,7 +23,7 @@ function executeTableCreate(ctrl: HwpCtrl, set: ParameterSet | null): boolean {
   const rows = set?.GetItem('Rows') ?? 5;
   const cols = set?.GetItem('Cols') ?? 5;
 
-  try {
+  return ctrl.executeWithUndo(() => {
     // 1. 표 생성 (기본 균등 분배)
     const result = doc.createTable(cursor.section, cursor.para, cursor.pos, rows, cols);
     const parsed = JSON.parse(result);
@@ -45,10 +45,7 @@ function executeTableCreate(ctrl: HwpCtrl, set: ParameterSet | null): boolean {
     // 커서를 표 다음 문단으로 이동
     ctrl.SetPos(cursor.section, tableParaIdx + 1, 0);
     return true;
-  } catch (e) {
-    console.error('[hwpctl] TableCreate 실패:', e);
-    return false;
-  }
+  });
 }
 
 // Action 등록
@@ -57,4 +54,6 @@ registerAction({
   parameterSetId: 'TableCreation',
   description: '표 만들기',
   executor: executeTableCreate,
+  compatibilityStatus: 'partial',
+  statusNote: 'Rows/Cols와 일부 크기 항목만 hwpctl ParameterSet에서 매핑합니다.',
 });

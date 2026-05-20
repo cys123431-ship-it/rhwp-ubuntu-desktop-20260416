@@ -37,9 +37,9 @@
 
 .sb-combo:focus { border-color: var(--color-focus-border); }
 
-#style-name { width: 60px; }
-.sb-font-lang { width: 44px; font-size: var(--font-size-sm); }
-.sb-font { width: 110px; }
+#style-name { width: 78px; }
+.sb-font-lang { width: 56px; font-size: var(--font-size-sm); }
+.sb-font { width: 125px; }
 
 /* 크기 그룹 */
 .sb-size-group {
@@ -343,7 +343,7 @@
 }
 
 .sb-ls-select {
-  width: 56px;
+  width: 68px;
   height: 22px;
   font-size: var(--font-size-sm);
   border: 1px solid #b0b0b0;

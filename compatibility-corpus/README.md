@@ -11,6 +11,14 @@ Phase corpus manifests for Ubuntu v1 shipment and later Hancom-grade compatibili
   explicit `parse-error` for malformed fixtures.
 - `phase2-extended.tsv`
   Broader exploratory corpus for later promotion work and compatibility report artifacts.
+- `hancom-quality-manifest.tsv`
+  한컴 호환 품질 매니페스트. 샘플별 예상 editMode, 페이지 수, 레이아웃 허용오차,
+  저장 후 재파싱 방식, Web/Ubuntu/Windows 게이트를 추적한다.
+- `hancom-shortcut-audit.tsv`
+  한컴 기본 단축키와 RHWP 커맨드/컨텍스트/테스트 연결 상태를 추적한다.
+- `hancom-feature-parity-matrix.tsv`
+  파일/편집/보기/입력/서식/쪽/표/검토/보안/플랫폼 기능 축의 한컴 대비 구현 상태를
+  `implemented | partial | stub | unsupported | missing | bug` 기준으로 추적한다.
 
 ## TSV format
 

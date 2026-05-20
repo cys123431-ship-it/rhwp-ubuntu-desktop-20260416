@@ -1,14 +1,15 @@
 //! 텍스트 삽입/삭제/문단 분리·병합/범위 삭제/문단 쿼리 관련 native 메서드
 
-use crate::model::control::Control;
+use super::super::helpers::get_textbox_from_shape;
+use crate::document_core::DocumentCore;
+use crate::error::HwpError;
+use crate::model::control::{Control, PageNumberPos};
+use crate::model::document::Section;
+use crate::model::event::DocumentEvent;
+use crate::model::page::ColumnDef;
 use crate::model::paragraph::Paragraph;
 use crate::renderer::composer::{compose_paragraph, reflow_line_segs, ComposedParagraph};
 use crate::renderer::page_layout::PageLayoutInfo;
-use crate::model::page::ColumnDef;
-use crate::document_core::DocumentCore;
-use crate::error::HwpError;
-use crate::model::event::DocumentEvent;
-use super::super::helpers::get_textbox_from_shape;
 
 impl DocumentCore {
     pub fn insert_text_native(
@@ -21,13 +22,17 @@ impl DocumentCore {
         // 인덱스 범위 검증
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.document.sections.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.document.sections.len()
             )));
         }
         let section = &self.document.sections[section_idx];
         if para_idx >= section.paragraphs.len() {
             return Err(HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과 (총 {}개)", para_idx, section.paragraphs.len()
+                "문단 인덱스 {} 범위 초과 (총 {}개)",
+                para_idx,
+                section.paragraphs.len()
             )));
         }
 
@@ -36,34 +41,39 @@ impl DocumentCore {
 
         // 텍스트 삽입
         let new_chars_count = text.chars().count();
-        self.document.sections[section_idx].paragraphs[para_idx]
-            .insert_text_at(char_offset, text);
+        self.document.sections[section_idx].paragraphs[para_idx].insert_text_at(char_offset, text);
 
         // line_segs 재계산 (리플로우) → vpos 재계산 → 재구성 → 재페이지네이션
         // 다단 문서에서 편집 후 문단이 다른 단으로 재배치될 수 있으므로
         // para_column_map 변경 감지 + 재reflow 수렴 루프 (최대 3회)
-        let old_col = self.para_column_map
+        let old_col = self
+            .para_column_map
             .get(section_idx)
             .and_then(|m| m.get(para_idx))
             .copied()
             .unwrap_or(0);
         self.reflow_paragraph(section_idx, para_idx);
         crate::renderer::composer::recalculate_section_vpos(
-            &mut self.document.sections[section_idx].paragraphs, para_idx,
+            &mut self.document.sections[section_idx].paragraphs,
+            para_idx,
         );
         self.recompose_paragraph(section_idx, para_idx);
         self.paginate_if_needed();
 
         for _ in 0..2 {
-            let new_col = self.para_column_map
+            let new_col = self
+                .para_column_map
                 .get(section_idx)
                 .and_then(|m| m.get(para_idx))
                 .copied()
                 .unwrap_or(0);
-            if new_col == old_col { break; }
+            if new_col == old_col {
+                break;
+            }
             self.reflow_paragraph(section_idx, para_idx);
             crate::renderer::composer::recalculate_section_vpos(
-                &mut self.document.sections[section_idx].paragraphs, para_idx,
+                &mut self.document.sections[section_idx].paragraphs,
+                para_idx,
             );
             self.recompose_paragraph(section_idx, para_idx);
             self.paginate_if_needed();
@@ -79,7 +89,10 @@ impl DocumentCore {
         } else if !para.char_offsets.is_empty() {
             let last = para.char_offsets.len() - 1;
             let last_char = para.text.chars().nth(last);
-            para.char_offsets[last] + last_char.map(|c| if (c as u32) > 0xFFFF { 2 } else { 1 }).unwrap_or(1)
+            para.char_offsets[last]
+                + last_char
+                    .map(|c| if (c as u32) > 0xFFFF { 2 } else { 1 })
+                    .unwrap_or(1)
         } else {
             // 텍스트 없이 컨트롤만 있는 경우
             (para.controls.len() as u32) * 8
@@ -91,12 +104,23 @@ impl DocumentCore {
         // DocInfo raw_stream 내 캐럿 위치만 surgical update (전체 재직렬화 방지)
         if let Some(ref mut raw) = self.document.doc_info.raw_stream {
             let _ = crate::serializer::doc_info::surgical_update_caret(
-                raw, section_idx as u32, para_idx as u32, caret_utf16_pos,
+                raw,
+                section_idx as u32,
+                para_idx as u32,
+                caret_utf16_pos,
             );
         }
 
-        self.event_log.push(DocumentEvent::TextInserted { section: section_idx, para: para_idx, offset: char_offset, len: new_chars_count });
-        Ok(super::super::helpers::json_ok_with(&format!("\"charOffset\":{}", new_offset)))
+        self.event_log.push(DocumentEvent::TextInserted {
+            section: section_idx,
+            para: para_idx,
+            offset: char_offset,
+            len: new_chars_count,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"charOffset\":{}",
+            new_offset
+        )))
     }
 
     /// 텍스트 삭제 (네이티브 에러 타입)
@@ -110,13 +134,17 @@ impl DocumentCore {
         // 인덱스 범위 검증
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.document.sections.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.document.sections.len()
             )));
         }
         let section = &self.document.sections[section_idx];
         if para_idx >= section.paragraphs.len() {
             return Err(HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과 (총 {}개)", para_idx, section.paragraphs.len()
+                "문단 인덱스 {} 범위 초과 (총 {}개)",
+                para_idx,
+                section.paragraphs.len()
             )));
         }
 
@@ -124,33 +152,38 @@ impl DocumentCore {
         self.document.sections[section_idx].raw_stream = None;
 
         // 텍스트 삭제
-        self.document.sections[section_idx].paragraphs[para_idx]
-            .delete_text_at(char_offset, count);
+        self.document.sections[section_idx].paragraphs[para_idx].delete_text_at(char_offset, count);
 
         // line_segs 재계산 (리플로우) → 재구성 → 재페이지네이션
         // 다단 수렴 루프 (최대 3회)
-        let old_col = self.para_column_map
+        let old_col = self
+            .para_column_map
             .get(section_idx)
             .and_then(|m| m.get(para_idx))
             .copied()
             .unwrap_or(0);
         self.reflow_paragraph(section_idx, para_idx);
         crate::renderer::composer::recalculate_section_vpos(
-            &mut self.document.sections[section_idx].paragraphs, para_idx,
+            &mut self.document.sections[section_idx].paragraphs,
+            para_idx,
         );
         self.recompose_paragraph(section_idx, para_idx);
         self.paginate_if_needed();
 
         for _ in 0..2 {
-            let new_col = self.para_column_map
+            let new_col = self
+                .para_column_map
                 .get(section_idx)
                 .and_then(|m| m.get(para_idx))
                 .copied()
                 .unwrap_or(0);
-            if new_col == old_col { break; }
+            if new_col == old_col {
+                break;
+            }
             self.reflow_paragraph(section_idx, para_idx);
             crate::renderer::composer::recalculate_section_vpos(
-                &mut self.document.sections[section_idx].paragraphs, para_idx,
+                &mut self.document.sections[section_idx].paragraphs,
+                para_idx,
             );
             self.recompose_paragraph(section_idx, para_idx);
             self.paginate_if_needed();
@@ -163,7 +196,10 @@ impl DocumentCore {
         } else if !para.char_offsets.is_empty() {
             let last = para.char_offsets.len() - 1;
             let last_char = para.text.chars().nth(last);
-            para.char_offsets[last] + last_char.map(|c| if (c as u32) > 0xFFFF { 2 } else { 1 }).unwrap_or(1)
+            para.char_offsets[last]
+                + last_char
+                    .map(|c| if (c as u32) > 0xFFFF { 2 } else { 1 })
+                    .unwrap_or(1)
         } else {
             (para.controls.len() as u32) * 8
         };
@@ -174,12 +210,23 @@ impl DocumentCore {
         // DocInfo raw_stream 내 캐럿 위치만 surgical update (전체 재직렬화 방지)
         if let Some(ref mut raw) = self.document.doc_info.raw_stream {
             let _ = crate::serializer::doc_info::surgical_update_caret(
-                raw, section_idx as u32, para_idx as u32, caret_utf16_pos,
+                raw,
+                section_idx as u32,
+                para_idx as u32,
+                caret_utf16_pos,
             );
         }
 
-        self.event_log.push(DocumentEvent::TextDeleted { section: section_idx, para: para_idx, offset: char_offset, count });
-        Ok(super::super::helpers::json_ok_with(&format!("\"charOffset\":{}", char_offset)))
+        self.event_log.push(DocumentEvent::TextDeleted {
+            section: section_idx,
+            para: para_idx,
+            offset: char_offset,
+            count,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"charOffset\":{}",
+            char_offset
+        )))
     }
 
     /// 지정된 문단의 line_segs를 컬럼 너비 기반으로 재계산한다.
@@ -191,12 +238,15 @@ impl DocumentCore {
         let layout = PageLayoutInfo::from_page_def(page_def, &column_def, self.dpi);
 
         // 페이지네이션 매핑에서 문단의 소속 단 인덱스 조회
-        let col_idx = self.para_column_map
+        let col_idx = self
+            .para_column_map
             .get(section_idx)
             .and_then(|m| m.get(para_idx))
             .copied()
             .unwrap_or(0) as usize;
-        let col_area = layout.column_areas.get(col_idx)
+        let col_area = layout
+            .column_areas
+            .get(col_idx)
             .unwrap_or(&layout.column_areas[0]);
 
         // 문단 여백 계산
@@ -227,7 +277,11 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         // 셀 문단 접근 검증 및 텍스트 삽입
         let cell_para = self.get_cell_paragraph_mut(
-            section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx,
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
         )?;
         let new_chars_count = text.chars().count();
         cell_para.insert_text_at(char_offset, text);
@@ -236,7 +290,13 @@ impl DocumentCore {
         self.mark_cell_control_dirty(section_idx, parent_para_idx, control_idx);
 
         // 셀 폭 기반 리플로우
-        self.reflow_cell_paragraph(section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx);
+        self.reflow_cell_paragraph(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
+        );
 
         // raw 스트림 무효화, 재페이지네이션 (셀 편집 → composed 불변, section dirty만 설정)
         self.document.sections[section_idx].raw_stream = None;
@@ -244,8 +304,16 @@ impl DocumentCore {
         self.paginate_if_needed();
 
         let new_offset = char_offset + new_chars_count;
-        self.event_log.push(DocumentEvent::CellTextChanged { section: section_idx, para: parent_para_idx, ctrl: control_idx, cell: cell_idx });
-        Ok(super::super::helpers::json_ok_with(&format!("\"charOffset\":{}", new_offset)))
+        self.event_log.push(DocumentEvent::CellTextChanged {
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: control_idx,
+            cell: cell_idx,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"charOffset\":{}",
+            new_offset
+        )))
     }
 
     /// 표 셀 내부 문단에서 텍스트 삭제 (네이티브)
@@ -261,7 +329,11 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         // 셀 문단 접근 검증 및 텍스트 삭제
         let cell_para = self.get_cell_paragraph_mut(
-            section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx,
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
         )?;
         cell_para.delete_text_at(char_offset, count);
 
@@ -269,15 +341,29 @@ impl DocumentCore {
         self.mark_cell_control_dirty(section_idx, parent_para_idx, control_idx);
 
         // 셀 폭 기반 리플로우
-        self.reflow_cell_paragraph(section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx);
+        self.reflow_cell_paragraph(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
+        );
 
         // raw 스트림 무효화, 재페이지네이션 (셀 편집 → composed 불변)
         self.document.sections[section_idx].raw_stream = None;
         self.mark_section_dirty(section_idx);
         self.paginate_if_needed();
 
-        self.event_log.push(DocumentEvent::CellTextChanged { section: section_idx, para: parent_para_idx, ctrl: control_idx, cell: cell_idx });
-        Ok(super::super::helpers::json_ok_with(&format!("\"charOffset\":{}", char_offset)))
+        self.event_log.push(DocumentEvent::CellTextChanged {
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: control_idx,
+            cell: cell_idx,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"charOffset\":{}",
+            char_offset
+        )))
     }
 
     /// 표 셀 또는 글상자 내부 문단에 대한 가변 참조를 얻는다.
@@ -291,75 +377,88 @@ impl DocumentCore {
     ) -> Result<&mut crate::model::paragraph::Paragraph, HwpError> {
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과", section_idx
+                "구역 인덱스 {} 범위 초과",
+                section_idx
             )));
         }
         let section = &mut self.document.sections[section_idx];
         if parent_para_idx >= section.paragraphs.len() {
             return Err(HwpError::RenderError(format!(
-                "부모 문단 인덱스 {} 범위 초과", parent_para_idx
+                "부모 문단 인덱스 {} 범위 초과",
+                parent_para_idx
             )));
         }
         let para = &mut section.paragraphs[parent_para_idx];
         if control_idx >= para.controls.len() {
             return Err(HwpError::RenderError(format!(
-                "컨트롤 인덱스 {} 범위 초과", control_idx
+                "컨트롤 인덱스 {} 범위 초과",
+                control_idx
             )));
         }
         match &mut para.controls[control_idx] {
             Control::Table(t) => {
                 // cell_idx == 65534: 표 캡션 접근 (TypeScript에서 표 캡션 편집 시 사용)
                 if cell_idx == 65534 {
-                    let cap = t.caption.as_mut()
-                        .ok_or_else(|| HwpError::RenderError(
-                            "지정된 표 컨트롤에 캡션이 없습니다".to_string()
-                        ))?;
+                    let cap = t.caption.as_mut().ok_or_else(|| {
+                        HwpError::RenderError("지정된 표 컨트롤에 캡션이 없습니다".to_string())
+                    })?;
                     if cell_para_idx >= cap.paragraphs.len() {
                         return Err(HwpError::RenderError(format!(
-                            "캡션 문단 인덱스 {} 범위 초과 (총 {}개)", cell_para_idx, cap.paragraphs.len()
+                            "캡션 문단 인덱스 {} 범위 초과 (총 {}개)",
+                            cell_para_idx,
+                            cap.paragraphs.len()
                         )));
                     }
                     return Ok(&mut cap.paragraphs[cell_para_idx]);
                 }
                 if cell_idx >= t.cells.len() {
                     return Err(HwpError::RenderError(format!(
-                        "셀 인덱스 {} 범위 초과 (총 {}개)", cell_idx, t.cells.len()
+                        "셀 인덱스 {} 범위 초과 (총 {}개)",
+                        cell_idx,
+                        t.cells.len()
                     )));
                 }
                 let cell = &mut t.cells[cell_idx];
                 if cell_para_idx >= cell.paragraphs.len() {
                     return Err(HwpError::RenderError(format!(
-                        "셀 문단 인덱스 {} 범위 초과 (총 {}개)", cell_para_idx, cell.paragraphs.len()
+                        "셀 문단 인덱스 {} 범위 초과 (총 {}개)",
+                        cell_para_idx,
+                        cell.paragraphs.len()
                     )));
                 }
                 Ok(&mut cell.paragraphs[cell_para_idx])
             }
             Control::Shape(shape) => {
-                let tb = super::super::helpers::get_textbox_from_shape_mut(shape)
-                    .ok_or_else(|| HwpError::RenderError(
-                        "지정된 Shape 컨트롤에 텍스트 박스가 없습니다".to_string()
-                    ))?;
+                let tb =
+                    super::super::helpers::get_textbox_from_shape_mut(shape).ok_or_else(|| {
+                        HwpError::RenderError(
+                            "지정된 Shape 컨트롤에 텍스트 박스가 없습니다".to_string(),
+                        )
+                    })?;
                 if cell_para_idx >= tb.paragraphs.len() {
                     return Err(HwpError::RenderError(format!(
-                        "글상자 문단 인덱스 {} 범위 초과 (총 {}개)", cell_para_idx, tb.paragraphs.len()
+                        "글상자 문단 인덱스 {} 범위 초과 (총 {}개)",
+                        cell_para_idx,
+                        tb.paragraphs.len()
                     )));
                 }
                 Ok(&mut tb.paragraphs[cell_para_idx])
             }
             Control::Picture(pic) => {
-                let cap = pic.caption.as_mut()
-                    .ok_or_else(|| HwpError::RenderError(
-                        "지정된 그림 컨트롤에 캡션이 없습니다".to_string()
-                    ))?;
+                let cap = pic.caption.as_mut().ok_or_else(|| {
+                    HwpError::RenderError("지정된 그림 컨트롤에 캡션이 없습니다".to_string())
+                })?;
                 if cell_para_idx >= cap.paragraphs.len() {
                     return Err(HwpError::RenderError(format!(
-                        "캡션 문단 인덱스 {} 범위 초과 (총 {}개)", cell_para_idx, cap.paragraphs.len()
+                        "캡션 문단 인덱스 {} 범위 초과 (총 {}개)",
+                        cell_para_idx,
+                        cap.paragraphs.len()
                     )));
                 }
                 Ok(&mut cap.paragraphs[cell_para_idx])
             }
             _ => Err(HwpError::RenderError(
-                "지정된 컨트롤이 표, 글상자 또는 그림이 아닙니다".to_string()
+                "지정된 컨트롤이 표, 글상자 또는 그림이 아닙니다".to_string(),
             )),
         }
     }
@@ -371,11 +470,14 @@ impl DocumentCore {
         parent_para_idx: usize,
         control_idx: usize,
     ) {
-        if let Some(ctrl) = self.document.sections[section_idx]
-            .paragraphs[parent_para_idx].controls.get_mut(control_idx)
+        if let Some(ctrl) = self.document.sections[section_idx].paragraphs[parent_para_idx]
+            .controls
+            .get_mut(control_idx)
         {
             match ctrl {
-                Control::Table(t) => { t.dirty = true; }
+                Control::Table(t) => {
+                    t.dirty = true;
+                }
                 // Shape는 별도 dirty 필드가 없으므로 section dirty만으로 충분
                 _ => {}
             }
@@ -450,7 +552,11 @@ impl DocumentCore {
         // 문단 여백 계산
         let para_shape_id = {
             let cell_para = self.get_cell_paragraph_ref(
-                section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx,
+                section_idx,
+                parent_para_idx,
+                control_idx,
+                cell_idx,
+                cell_para_idx,
             );
             match cell_para {
                 Some(p) => p.para_shape_id,
@@ -463,8 +569,9 @@ impl DocumentCore {
         let final_width = (available_width - margin_left - margin_right).max(0.0);
 
         // 가변 참조로 리플로우 실행
-        match self.document.sections[section_idx]
-            .paragraphs[parent_para_idx].controls.get_mut(control_idx)
+        match self.document.sections[section_idx].paragraphs[parent_para_idx]
+            .controls
+            .get_mut(control_idx)
         {
             Some(Control::Table(table)) => {
                 if let Some(cell) = table.cells.get_mut(cell_idx) {
@@ -512,7 +619,8 @@ impl DocumentCore {
                 // 같은 문단 내 삭제
                 let count = end_offset - start_offset;
                 if count > 0 {
-                    let cell_para = self.get_cell_paragraph_mut(section_idx, ppi, ci, cei, start_para)?;
+                    let cell_para =
+                        self.get_cell_paragraph_mut(section_idx, ppi, ci, cei, start_para)?;
                     cell_para.delete_text_at(start_offset, count);
                     self.reflow_cell_paragraph(section_idx, ppi, ci, cei, start_para);
                 }
@@ -520,7 +628,8 @@ impl DocumentCore {
                 // 다중 문단 셀 내 삭제
                 // 1) 마지막 문단 앞부분 삭제
                 if end_offset > 0 {
-                    let cell_para = self.get_cell_paragraph_mut(section_idx, ppi, ci, cei, end_para)?;
+                    let cell_para =
+                        self.get_cell_paragraph_mut(section_idx, ppi, ci, cei, end_para)?;
                     cell_para.delete_text_at(0, end_offset);
                 }
                 // 2) 중간 문단 역순 제거 — 셀 내 문단은 cell.paragraphs에서 직접 제거
@@ -532,7 +641,8 @@ impl DocumentCore {
                 }
                 // 3) 첫 문단 뒷부분 삭제
                 {
-                    let cell_para = self.get_cell_paragraph_mut(section_idx, ppi, ci, cei, start_para)?;
+                    let cell_para =
+                        self.get_cell_paragraph_mut(section_idx, ppi, ci, cei, start_para)?;
                     let para_len = cell_para.text.chars().count();
                     if start_offset < para_len {
                         cell_para.delete_text_at(start_offset, para_len - start_offset);
@@ -551,8 +661,16 @@ impl DocumentCore {
             self.mark_cell_control_dirty(section_idx, ppi, ci);
             self.mark_section_dirty(section_idx);
             self.paginate_if_needed();
-            self.event_log.push(DocumentEvent::CellTextChanged { section: section_idx, para: ppi, ctrl: ci, cell: cei });
-            Ok(super::super::helpers::json_ok_with(&format!("\"paraIdx\":{},\"charOffset\":{}", start_para, start_offset)))
+            self.event_log.push(DocumentEvent::CellTextChanged {
+                section: section_idx,
+                para: ppi,
+                ctrl: ci,
+                cell: cei,
+            });
+            Ok(super::super::helpers::json_ok_with(&format!(
+                "\"paraIdx\":{},\"charOffset\":{}",
+                start_para, start_offset
+            )))
         } else {
             // ─── 본문 deleteRange ───
             if start_para == end_para {
@@ -563,7 +681,8 @@ impl DocumentCore {
                         .delete_text_at(start_offset, count);
                     self.reflow_paragraph(section_idx, start_para);
                     crate::renderer::composer::recalculate_section_vpos(
-                        &mut self.document.sections[section_idx].paragraphs, start_para,
+                        &mut self.document.sections[section_idx].paragraphs,
+                        start_para,
                     );
                 }
                 // 변경 문단만 재구성
@@ -576,12 +695,17 @@ impl DocumentCore {
                 }
                 // 2) 중간 문단 역순 제거 (composed도 동기)
                 for mid_para in (start_para + 1..end_para).rev() {
-                    self.document.sections[section_idx].paragraphs.remove(mid_para);
+                    self.document.sections[section_idx]
+                        .paragraphs
+                        .remove(mid_para);
                     self.remove_composed_paragraph(section_idx, mid_para);
                 }
                 // 3) 첫 문단 뒷부분 삭제
                 {
-                    let para_len = self.document.sections[section_idx].paragraphs[start_para].text.chars().count();
+                    let para_len = self.document.sections[section_idx].paragraphs[start_para]
+                        .text
+                        .chars()
+                        .count();
                     if start_offset < para_len {
                         self.document.sections[section_idx].paragraphs[start_para]
                             .delete_text_at(start_offset, para_len - start_offset);
@@ -589,13 +713,16 @@ impl DocumentCore {
                 }
                 // 4) 첫-마지막 문단 병합 (마지막 문단이 이제 start_para+1에 위치)
                 if start_para + 1 < self.document.sections[section_idx].paragraphs.len() {
-                    let next = self.document.sections[section_idx].paragraphs.remove(start_para + 1);
+                    let next = self.document.sections[section_idx]
+                        .paragraphs
+                        .remove(start_para + 1);
                     self.remove_composed_paragraph(section_idx, start_para + 1);
                     self.document.sections[section_idx].paragraphs[start_para].merge_from(&next);
                 }
                 self.reflow_paragraph(section_idx, start_para);
                 crate::renderer::composer::recalculate_section_vpos(
-                    &mut self.document.sections[section_idx].paragraphs, start_para,
+                    &mut self.document.sections[section_idx].paragraphs,
+                    start_para,
                 );
                 // 병합된 문단 재구성
                 self.recompose_paragraph(section_idx, start_para);
@@ -608,8 +735,16 @@ impl DocumentCore {
             self.document.doc_properties.caret_list_id = section_idx as u32;
             self.document.doc_properties.caret_para_id = start_para as u32;
 
-            self.event_log.push(DocumentEvent::TextDeleted { section: section_idx, para: start_para, offset: start_offset, count: 0 });
-            Ok(super::super::helpers::json_ok_with(&format!("\"paraIdx\":{},\"charOffset\":{}", start_para, start_offset)))
+            self.event_log.push(DocumentEvent::TextDeleted {
+                section: section_idx,
+                para: start_para,
+                offset: start_offset,
+                count: 0,
+            });
+            Ok(super::super::helpers::json_ok_with(&format!(
+                "\"paraIdx\":{},\"charOffset\":{}",
+                start_para, start_offset
+            )))
         }
     }
 
@@ -622,16 +757,20 @@ impl DocumentCore {
         cell_idx: usize,
     ) -> Result<&mut crate::model::table::Cell, HwpError> {
         let section = &mut self.document.sections[section_idx];
-        let para = section.paragraphs.get_mut(parent_para_idx)
-            .ok_or_else(|| HwpError::RenderError(format!("부모 문단 인덱스 {} 범위 초과", parent_para_idx)))?;
-        let ctrl = para.controls.get_mut(control_idx)
-            .ok_or_else(|| HwpError::RenderError(format!("컨트롤 인덱스 {} 범위 초과", control_idx)))?;
+        let para = section.paragraphs.get_mut(parent_para_idx).ok_or_else(|| {
+            HwpError::RenderError(format!("부모 문단 인덱스 {} 범위 초과", parent_para_idx))
+        })?;
+        let ctrl = para.controls.get_mut(control_idx).ok_or_else(|| {
+            HwpError::RenderError(format!("컨트롤 인덱스 {} 범위 초과", control_idx))
+        })?;
         match ctrl {
-            Control::Table(ref mut table) => {
-                table.cells.get_mut(cell_idx)
-                    .ok_or_else(|| HwpError::RenderError(format!("셀 인덱스 {} 범위 초과", cell_idx)))
-            }
-            _ => Err(HwpError::RenderError("테이블 컨트롤이 아닙니다".to_string())),
+            Control::Table(ref mut table) => table
+                .cells
+                .get_mut(cell_idx)
+                .ok_or_else(|| HwpError::RenderError(format!("셀 인덱스 {} 범위 초과", cell_idx))),
+            _ => Err(HwpError::RenderError(
+                "테이블 컨트롤이 아닙니다".to_string(),
+            )),
         }
     }
 
@@ -648,25 +787,26 @@ impl DocumentCore {
         cell_idx: usize,
         cell_para_idx: usize,
     ) -> Option<&crate::model::paragraph::Paragraph> {
-        let para = self.document.sections.get(section_idx)?
-            .paragraphs.get(parent_para_idx)?;
+        let para = self
+            .document
+            .sections
+            .get(section_idx)?
+            .paragraphs
+            .get(parent_para_idx)?;
         match para.controls.get(control_idx)? {
             Control::Table(table) => {
                 if cell_idx == 65534 {
                     return table.caption.as_ref()?.paragraphs.get(cell_para_idx);
                 }
-                table.cells.get(cell_idx)?
-                    .paragraphs.get(cell_para_idx)
+                table.cells.get(cell_idx)?.paragraphs.get(cell_para_idx)
             }
             Control::Shape(shape) => {
-                if cell_idx != 0 { return None; }
-                get_textbox_from_shape(shape)?
-                    .paragraphs.get(cell_para_idx)
+                if cell_idx != 0 {
+                    return None;
+                }
+                get_textbox_from_shape(shape)?.paragraphs.get(cell_para_idx)
             }
-            Control::Picture(pic) => {
-                pic.caption.as_ref()?
-                    .paragraphs.get(cell_para_idx)
-            }
+            Control::Picture(pic) => pic.caption.as_ref()?.paragraphs.get(cell_para_idx),
             _ => None,
         }
     }
@@ -679,13 +819,17 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.document.sections.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.document.sections.len()
             )));
         }
         let section = &self.document.sections[section_idx];
         if para_idx >= section.paragraphs.len() {
             return Err(HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과 (총 {}개)", para_idx, section.paragraphs.len()
+                "문단 인덱스 {} 범위 초과 (총 {}개)",
+                para_idx,
+                section.paragraphs.len()
             )));
         }
 
@@ -693,41 +837,62 @@ impl DocumentCore {
         self.document.sections[section_idx].raw_stream = None;
 
         // 문단 분리
-        let new_para = self.document.sections[section_idx].paragraphs[para_idx]
-            .split_at(char_offset);
+        let new_para =
+            self.document.sections[section_idx].paragraphs[para_idx].split_at(char_offset);
 
         // 새 문단을 현재 문단 뒤에 삽입
         let new_para_idx = para_idx + 1;
-        self.document.sections[section_idx].paragraphs.insert(new_para_idx, new_para);
+        self.document.sections[section_idx]
+            .paragraphs
+            .insert(new_para_idx, new_para);
 
         // 양쪽 문단 리플로우 → vpos 재계산 → 재구성 → 재페이지네이션 + 다단 수렴 루프
-        let old_col1 = self.para_column_map.get(section_idx)
-            .and_then(|m| m.get(para_idx)).copied().unwrap_or(0);
+        let old_col1 = self
+            .para_column_map
+            .get(section_idx)
+            .and_then(|m| m.get(para_idx))
+            .copied()
+            .unwrap_or(0);
         self.reflow_paragraph(section_idx, para_idx);
         self.reflow_paragraph(section_idx, new_para_idx);
         crate::renderer::composer::recalculate_section_vpos(
-            &mut self.document.sections[section_idx].paragraphs, para_idx,
+            &mut self.document.sections[section_idx].paragraphs,
+            para_idx,
         );
         self.recompose_paragraph(section_idx, para_idx);
         self.insert_composed_paragraph(section_idx, new_para_idx);
         self.paginate_if_needed();
 
         for _ in 0..2 {
-            let new_col1 = self.para_column_map.get(section_idx)
-                .and_then(|m| m.get(para_idx)).copied().unwrap_or(0);
-            if new_col1 == old_col1 { break; }
+            let new_col1 = self
+                .para_column_map
+                .get(section_idx)
+                .and_then(|m| m.get(para_idx))
+                .copied()
+                .unwrap_or(0);
+            if new_col1 == old_col1 {
+                break;
+            }
             self.reflow_paragraph(section_idx, para_idx);
             self.reflow_paragraph(section_idx, new_para_idx);
             crate::renderer::composer::recalculate_section_vpos(
-                &mut self.document.sections[section_idx].paragraphs, para_idx,
+                &mut self.document.sections[section_idx].paragraphs,
+                para_idx,
             );
             self.recompose_paragraph(section_idx, para_idx);
             self.recompose_paragraph(section_idx, new_para_idx);
             self.paginate_if_needed();
         }
 
-        self.event_log.push(DocumentEvent::ParagraphSplit { section: section_idx, para: para_idx, offset: char_offset });
-        Ok(super::super::helpers::json_ok_with(&format!("\"paraIdx\":{},\"charOffset\":0", new_para_idx)))
+        self.event_log.push(DocumentEvent::ParagraphSplit {
+            section: section_idx,
+            para: para_idx,
+            offset: char_offset,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"paraIdx\":{},\"charOffset\":0",
+            new_para_idx
+        )))
     }
 
     /// 강제 쪽 나누기 삽입 (Ctrl+Enter)
@@ -742,25 +907,30 @@ impl DocumentCore {
 
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과", section_idx
+                "구역 인덱스 {} 범위 초과",
+                section_idx
             )));
         }
         if para_idx >= self.document.sections[section_idx].paragraphs.len() {
             return Err(HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과", para_idx
+                "문단 인덱스 {} 범위 초과",
+                para_idx
             )));
         }
 
         self.document.sections[section_idx].raw_stream = None;
 
         // 문단 분리
-        let new_para = self.document.sections[section_idx].paragraphs[para_idx]
-            .split_at(char_offset);
+        let new_para =
+            self.document.sections[section_idx].paragraphs[para_idx].split_at(char_offset);
         let new_para_idx = para_idx + 1;
-        self.document.sections[section_idx].paragraphs.insert(new_para_idx, new_para);
+        self.document.sections[section_idx]
+            .paragraphs
+            .insert(new_para_idx, new_para);
 
         // 새 문단에 쪽 나누기 설정
-        self.document.sections[section_idx].paragraphs[new_para_idx].column_type = ColumnBreakType::Page;
+        self.document.sections[section_idx].paragraphs[new_para_idx].column_type =
+            ColumnBreakType::Page;
         self.document.sections[section_idx].paragraphs[new_para_idx].raw_break_type = 0x04;
 
         // 분할된 두 문단 리플로우
@@ -778,8 +948,15 @@ impl DocumentCore {
         self.paginate_if_needed();
         self.invalidate_page_tree_cache();
 
-        self.event_log.push(DocumentEvent::ParagraphSplit { section: section_idx, para: para_idx, offset: char_offset });
-        Ok(super::super::helpers::json_ok_with(&format!("\"paraIdx\":{},\"charOffset\":0", new_para_idx)))
+        self.event_log.push(DocumentEvent::ParagraphSplit {
+            section: section_idx,
+            para: para_idx,
+            offset: char_offset,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"paraIdx\":{},\"charOffset\":0",
+            new_para_idx
+        )))
     }
 
     /// 단 나누기 삽입 (Ctrl+Shift+Enter)
@@ -794,22 +971,31 @@ impl DocumentCore {
         use crate::model::paragraph::ColumnBreakType;
 
         if section_idx >= self.document.sections.len() {
-            return Err(HwpError::RenderError(format!("구역 인덱스 {} 범위 초과", section_idx)));
+            return Err(HwpError::RenderError(format!(
+                "구역 인덱스 {} 범위 초과",
+                section_idx
+            )));
         }
         if para_idx >= self.document.sections[section_idx].paragraphs.len() {
-            return Err(HwpError::RenderError(format!("문단 인덱스 {} 범위 초과", para_idx)));
+            return Err(HwpError::RenderError(format!(
+                "문단 인덱스 {} 범위 초과",
+                para_idx
+            )));
         }
 
         self.document.sections[section_idx].raw_stream = None;
 
         // 문단 분리
-        let new_para = self.document.sections[section_idx].paragraphs[para_idx]
-            .split_at(char_offset);
+        let new_para =
+            self.document.sections[section_idx].paragraphs[para_idx].split_at(char_offset);
         let new_para_idx = para_idx + 1;
-        self.document.sections[section_idx].paragraphs.insert(new_para_idx, new_para);
+        self.document.sections[section_idx]
+            .paragraphs
+            .insert(new_para_idx, new_para);
 
         // 새 문단에 단 나누기 설정
-        self.document.sections[section_idx].paragraphs[new_para_idx].column_type = ColumnBreakType::Column;
+        self.document.sections[section_idx].paragraphs[new_para_idx].column_type =
+            ColumnBreakType::Column;
         self.document.sections[section_idx].paragraphs[new_para_idx].raw_break_type = 0x08;
 
         // 분할된 두 문단 리플로우
@@ -825,8 +1011,15 @@ impl DocumentCore {
         self.paginate_if_needed();
         self.invalidate_page_tree_cache();
 
-        self.event_log.push(DocumentEvent::ParagraphSplit { section: section_idx, para: para_idx, offset: char_offset });
-        Ok(super::super::helpers::json_ok_with(&format!("\"paraIdx\":{},\"charOffset\":0", new_para_idx)))
+        self.event_log.push(DocumentEvent::ParagraphSplit {
+            section: section_idx,
+            para: para_idx,
+            offset: char_offset,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"paraIdx\":{},\"charOffset\":0",
+            new_para_idx
+        )))
     }
 
     /// 다단 설정 변경
@@ -840,14 +1033,17 @@ impl DocumentCore {
         &mut self,
         section_idx: usize,
         column_count: u16,
-        column_type: u8,      // 0=일반(Normal), 1=배분(Distribute), 2=평행(Parallel)
+        column_type: u8, // 0=일반(Normal), 1=배분(Distribute), 2=평행(Parallel)
         same_width: bool,
-        spacing_hu: i16,      // 단 간격 (HWPUNIT)
+        spacing_hu: i16, // 단 간격 (HWPUNIT)
     ) -> Result<String, HwpError> {
-        use crate::model::page::{ColumnType, ColumnDirection};
+        use crate::model::page::{ColumnDirection, ColumnType};
 
         if section_idx >= self.document.sections.len() {
-            return Err(HwpError::RenderError(format!("구역 인덱스 {} 범위 초과", section_idx)));
+            return Err(HwpError::RenderError(format!(
+                "구역 인덱스 {} 범위 초과",
+                section_idx
+            )));
         }
 
         let col_type = match column_type {
@@ -874,7 +1070,9 @@ impl DocumentCore {
                     break;
                 }
             }
-            if found { break; }
+            if found {
+                break;
+            }
         }
 
         // 기존 ColumnDef가 없으면 첫 문단에 삽입
@@ -889,7 +1087,8 @@ impl DocumentCore {
             };
             if !self.document.sections[section_idx].paragraphs.is_empty() {
                 self.document.sections[section_idx].paragraphs[0]
-                    .controls.push(Control::ColumnDef(cd));
+                    .controls
+                    .push(Control::ColumnDef(cd));
             }
         }
 
@@ -900,6 +1099,126 @@ impl DocumentCore {
         Ok("{\"ok\":true}".to_string())
     }
 
+    /// 현재 위치에서 구역 나누기를 삽입한다.
+    pub fn insert_section_break_native(
+        &mut self,
+        section_idx: usize,
+        para_idx: usize,
+        char_offset: usize,
+    ) -> Result<String, HwpError> {
+        if section_idx >= self.document.sections.len() {
+            return Err(HwpError::RenderError(format!(
+                "구역 인덱스 {} 범위 초과",
+                section_idx
+            )));
+        }
+        if para_idx >= self.document.sections[section_idx].paragraphs.len() {
+            return Err(HwpError::RenderError(format!(
+                "문단 인덱스 {} 범위 초과",
+                para_idx
+            )));
+        }
+
+        self.split_paragraph_native(section_idx, para_idx, char_offset)?;
+        let new_para_idx = para_idx + 1;
+
+        let new_section = {
+            let section = &mut self.document.sections[section_idx];
+            let moved_paragraphs = section.paragraphs.split_off(new_para_idx);
+            section.raw_stream = None;
+            Section {
+                section_def: section.section_def.clone(),
+                paragraphs: moved_paragraphs,
+                raw_stream: None,
+            }
+        };
+
+        let inserted_section_idx = section_idx + 1;
+        self.document
+            .sections
+            .insert(inserted_section_idx, new_section);
+        self.document.doc_properties.section_count = self.document.sections.len() as u16;
+        self.document.sections[inserted_section_idx].raw_stream = None;
+        self.document.doc_properties.caret_list_id = inserted_section_idx as u32;
+        self.document.doc_properties.caret_para_id = 0;
+        self.document.doc_properties.caret_char_pos = 0;
+
+        self.composed = self
+            .document
+            .sections
+            .iter()
+            .map(crate::renderer::composer::compose_section)
+            .collect();
+        self.pagination.clear();
+        self.dirty_sections = vec![true; self.document.sections.len()];
+        self.measured_tables.clear();
+        self.measured_sections.clear();
+        self.dirty_paragraphs.clear();
+        self.para_column_map.clear();
+        self.para_offset = vec![0; self.document.sections.len()];
+        self.overflow_links_cache.borrow_mut().clear();
+        self.paginate_if_needed();
+        self.invalidate_page_tree_cache();
+
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"sectionIdx\":{},\"paraIdx\":0,\"charOffset\":0,\"sectionCount\":{}",
+            inserted_section_idx,
+            self.document.sections.len()
+        )))
+    }
+
+    /// 쪽 번호 위치 컨트롤을 삽입하거나 현재 문단의 기존 컨트롤을 갱신한다.
+    pub fn set_page_number_pos_native(
+        &mut self,
+        section_idx: usize,
+        para_idx: usize,
+        format: u8,
+        position: u8,
+        dash_char: char,
+    ) -> Result<String, HwpError> {
+        if section_idx >= self.document.sections.len() {
+            return Err(HwpError::RenderError(format!(
+                "구역 인덱스 {} 범위 초과",
+                section_idx
+            )));
+        }
+        if para_idx >= self.document.sections[section_idx].paragraphs.len() {
+            return Err(HwpError::RenderError(format!(
+                "문단 인덱스 {} 범위 초과",
+                para_idx
+            )));
+        }
+
+        let safe_position = if position > 10 { 5 } else { position };
+        let safe_dash = if dash_char == '\0' { '-' } else { dash_char };
+        let new_pos = PageNumberPos {
+            format,
+            position: safe_position,
+            dash_char: safe_dash,
+            ..Default::default()
+        };
+
+        let para = &mut self.document.sections[section_idx].paragraphs[para_idx];
+        if let Some(existing) = para.controls.iter_mut().find_map(|ctrl| match ctrl {
+            Control::PageNumberPos(pnp) => Some(pnp),
+            _ => None,
+        }) {
+            *existing = new_pos;
+        } else {
+            para.controls.push(Control::PageNumberPos(new_pos));
+        }
+
+        self.document.sections[section_idx].raw_stream = None;
+        self.rebuild_section(section_idx);
+        self.paginate_if_needed();
+        self.invalidate_page_tree_cache();
+
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"sectionIdx\":{},\"paraIdx\":{},\"format\":{},\"position\":{}",
+            section_idx, para_idx, format, safe_position
+        )))
+    }
+
     /// 문단 병합 (네이티브 에러 타입)
     pub fn merge_paragraph_native(
         &mut self,
@@ -908,18 +1227,22 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         if section_idx >= self.document.sections.len() {
             return Err(HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.document.sections.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.document.sections.len()
             )));
         }
         let section = &self.document.sections[section_idx];
         if para_idx == 0 {
             return Err(HwpError::RenderError(
-                "첫 번째 문단은 병합할 수 없습니다".to_string()
+                "첫 번째 문단은 병합할 수 없습니다".to_string(),
             ));
         }
         if para_idx >= section.paragraphs.len() {
             return Err(HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과 (총 {}개)", para_idx, section.paragraphs.len()
+                "문단 인덱스 {} 범위 초과 (총 {}개)",
+                para_idx,
+                section.paragraphs.len()
             )));
         }
 
@@ -927,36 +1250,56 @@ impl DocumentCore {
         self.document.sections[section_idx].raw_stream = None;
 
         // 현재 문단을 이전 문단에 병합
-        let current_para = self.document.sections[section_idx].paragraphs.remove(para_idx);
+        let current_para = self.document.sections[section_idx]
+            .paragraphs
+            .remove(para_idx);
         let prev_idx = para_idx - 1;
-        let merge_point = self.document.sections[section_idx].paragraphs[prev_idx]
-            .merge_from(&current_para);
+        let merge_point =
+            self.document.sections[section_idx].paragraphs[prev_idx].merge_from(&current_para);
 
         // 병합된 문단 리플로우 → vpos 재계산 → 재구성 → 재페이지네이션 + 다단 수렴 루프
-        let old_col = self.para_column_map.get(section_idx)
-            .and_then(|m| m.get(prev_idx)).copied().unwrap_or(0);
+        let old_col = self
+            .para_column_map
+            .get(section_idx)
+            .and_then(|m| m.get(prev_idx))
+            .copied()
+            .unwrap_or(0);
         self.reflow_paragraph(section_idx, prev_idx);
         crate::renderer::composer::recalculate_section_vpos(
-            &mut self.document.sections[section_idx].paragraphs, prev_idx,
+            &mut self.document.sections[section_idx].paragraphs,
+            prev_idx,
         );
         self.remove_composed_paragraph(section_idx, para_idx);
         self.recompose_paragraph(section_idx, prev_idx);
         self.paginate_if_needed();
 
         for _ in 0..2 {
-            let new_col = self.para_column_map.get(section_idx)
-                .and_then(|m| m.get(prev_idx)).copied().unwrap_or(0);
-            if new_col == old_col { break; }
+            let new_col = self
+                .para_column_map
+                .get(section_idx)
+                .and_then(|m| m.get(prev_idx))
+                .copied()
+                .unwrap_or(0);
+            if new_col == old_col {
+                break;
+            }
             self.reflow_paragraph(section_idx, prev_idx);
             crate::renderer::composer::recalculate_section_vpos(
-                &mut self.document.sections[section_idx].paragraphs, prev_idx,
+                &mut self.document.sections[section_idx].paragraphs,
+                prev_idx,
             );
             self.recompose_paragraph(section_idx, prev_idx);
             self.paginate_if_needed();
         }
 
-        self.event_log.push(DocumentEvent::ParagraphMerged { section: section_idx, para: para_idx });
-        Ok(super::super::helpers::json_ok_with(&format!("\"paraIdx\":{},\"charOffset\":{}", prev_idx, merge_point)))
+        self.event_log.push(DocumentEvent::ParagraphMerged {
+            section: section_idx,
+            para: para_idx,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"paraIdx\":{},\"charOffset\":{}",
+            prev_idx, merge_point
+        )))
     }
 
     /// 셀 내부 문단 분할 (네이티브 에러 타입)
@@ -971,17 +1314,24 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         // 셀 문단 검증 및 분할
         let cell_para = self.get_cell_paragraph_mut(
-            section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx,
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
         )?;
         let new_para = cell_para.split_at(char_offset);
 
         // 새 문단을 셀/글상자에 삽입
         let new_cell_para_idx = cell_para_idx + 1;
-        match self.document.sections[section_idx]
-            .paragraphs[parent_para_idx].controls.get_mut(control_idx)
+        match self.document.sections[section_idx].paragraphs[parent_para_idx]
+            .controls
+            .get_mut(control_idx)
         {
             Some(Control::Table(table)) => {
-                table.cells[cell_idx].paragraphs.insert(new_cell_para_idx, new_para);
+                table.cells[cell_idx]
+                    .paragraphs
+                    .insert(new_cell_para_idx, new_para);
                 table.dirty = true;
             }
             Some(Control::Shape(shape)) => {
@@ -998,16 +1348,36 @@ impl DocumentCore {
         }
 
         // 양쪽 문단 리플로우
-        self.reflow_cell_paragraph(section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx);
-        self.reflow_cell_paragraph(section_idx, parent_para_idx, control_idx, cell_idx, new_cell_para_idx);
+        self.reflow_cell_paragraph(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            cell_para_idx,
+        );
+        self.reflow_cell_paragraph(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            new_cell_para_idx,
+        );
 
         // raw 스트림 무효화, section dirty, 재페이지네이션
         self.document.sections[section_idx].raw_stream = None;
         self.mark_section_dirty(section_idx);
         self.paginate_if_needed();
 
-        self.event_log.push(DocumentEvent::CellTextChanged { section: section_idx, para: parent_para_idx, ctrl: control_idx, cell: cell_idx });
-        Ok(super::super::helpers::json_ok_with(&format!("\"cellParaIndex\":{},\"charOffset\":0", new_cell_para_idx)))
+        self.event_log.push(DocumentEvent::CellTextChanged {
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: control_idx,
+            cell: cell_idx,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"cellParaIndex\":{},\"charOffset\":0",
+            new_cell_para_idx
+        )))
     }
 
     /// 셀 내부 문단 병합 (네이티브 에러 타입)
@@ -1023,14 +1393,18 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         if cell_para_idx == 0 {
             return Err(HwpError::RenderError(
-                "셀 첫 번째 문단은 병합할 수 없습니다".to_string()
+                "셀 첫 번째 문단은 병합할 수 없습니다".to_string(),
             ));
         }
 
         // 검증: 셀 문단 인덱스 범위 확인
         {
             let cell_para = self.get_cell_paragraph_mut(
-                section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx,
+                section_idx,
+                parent_para_idx,
+                control_idx,
+                cell_idx,
+                cell_para_idx,
             )?;
             let _ = cell_para; // 검증만 수행
         }
@@ -1038,8 +1412,9 @@ impl DocumentCore {
         // 문단 제거 및 이전 문단에 병합
         let prev_idx = cell_para_idx - 1;
         let merge_point;
-        match self.document.sections[section_idx]
-            .paragraphs[parent_para_idx].controls.get_mut(control_idx)
+        match self.document.sections[section_idx].paragraphs[parent_para_idx]
+            .controls
+            .get_mut(control_idx)
         {
             Some(Control::Table(table)) => {
                 let removed = table.cells[cell_idx].paragraphs.remove(cell_para_idx);
@@ -1052,7 +1427,7 @@ impl DocumentCore {
                     merge_point = tb.paragraphs[prev_idx].merge_from(&removed);
                 } else {
                     return Err(HwpError::RenderError(
-                        "지정된 Shape 컨트롤에 텍스트 박스가 없습니다".to_string()
+                        "지정된 Shape 컨트롤에 텍스트 박스가 없습니다".to_string(),
                     ));
                 }
             }
@@ -1062,27 +1437,41 @@ impl DocumentCore {
                     merge_point = cap.paragraphs[prev_idx].merge_from(&removed);
                 } else {
                     return Err(HwpError::RenderError(
-                        "지정된 그림 컨트롤에 캡션이 없습니다".to_string()
+                        "지정된 그림 컨트롤에 캡션이 없습니다".to_string(),
                     ));
                 }
             }
             _ => {
                 return Err(HwpError::RenderError(
-                    "지정된 컨트롤이 표, 글상자 또는 그림이 아닙니다".to_string()
+                    "지정된 컨트롤이 표, 글상자 또는 그림이 아닙니다".to_string(),
                 ));
             }
         }
 
         // 병합된 문단 리플로우
-        self.reflow_cell_paragraph(section_idx, parent_para_idx, control_idx, cell_idx, prev_idx);
+        self.reflow_cell_paragraph(
+            section_idx,
+            parent_para_idx,
+            control_idx,
+            cell_idx,
+            prev_idx,
+        );
 
         // raw 스트림 무효화, section dirty, 재페이지네이션
         self.document.sections[section_idx].raw_stream = None;
         self.mark_section_dirty(section_idx);
         self.paginate_if_needed();
 
-        self.event_log.push(DocumentEvent::CellTextChanged { section: section_idx, para: parent_para_idx, ctrl: control_idx, cell: cell_idx });
-        Ok(super::super::helpers::json_ok_with(&format!("\"cellParaIndex\":{},\"charOffset\":{}", prev_idx, merge_point)))
+        self.event_log.push(DocumentEvent::CellTextChanged {
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: control_idx,
+            cell: cell_idx,
+        });
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"cellParaIndex\":{},\"charOffset\":{}",
+            prev_idx, merge_point
+        )))
     }
 
     // ─── Phase 1 Native: 기본 편집 보조 API ────────────────────
@@ -1091,22 +1480,32 @@ impl DocumentCore {
     pub fn get_paragraph_count_native(&self, section_idx: usize) -> Result<usize, HwpError> {
         let section = self.document.sections.get(section_idx).ok_or_else(|| {
             HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.document.sections.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.document.sections.len()
             ))
         })?;
         Ok(section.paragraphs.len())
     }
 
     /// 문단 글자 수 (네이티브)
-    pub fn get_paragraph_length_native(&self, section_idx: usize, para_idx: usize) -> Result<usize, HwpError> {
+    pub fn get_paragraph_length_native(
+        &self,
+        section_idx: usize,
+        para_idx: usize,
+    ) -> Result<usize, HwpError> {
         let section = self.document.sections.get(section_idx).ok_or_else(|| {
             HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.document.sections.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.document.sections.len()
             ))
         })?;
         let para = section.paragraphs.get(para_idx).ok_or_else(|| {
             HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과 (총 {}개)", para_idx, section.paragraphs.len()
+                "문단 인덱스 {} 범위 초과 (총 {}개)",
+                para_idx,
+                section.paragraphs.len()
             ))
         })?;
         Ok(para.text.chars().count())
@@ -1163,7 +1562,11 @@ impl DocumentCore {
             let p = section.paragraphs.get(para)?;
             let controls = &p.controls;
             if forward {
-                let from = if start_ci < 0 { 0usize } else { (start_ci as usize) + 1 };
+                let from = if start_ci < 0 {
+                    0usize
+                } else {
+                    (start_ci as usize) + 1
+                };
                 for ci in from..controls.len() {
                     match &controls[ci] {
                         Control::Shape(shape) => {
@@ -1178,7 +1581,11 @@ impl DocumentCore {
                     }
                 }
             } else {
-                let until = if start_ci < 0 { controls.len() } else { start_ci as usize };
+                let until = if start_ci < 0 {
+                    controls.len()
+                } else {
+                    start_ci as usize
+                };
                 for ci in (0..until).rev() {
                     match &controls[ci] {
                         Control::Shape(shape) => {
@@ -1215,7 +1622,10 @@ impl DocumentCore {
 
         // 1) 같은 문단에서 탐색
         if let Some((ci, ty)) = find_in_para(sections, section_idx, para_idx, ctrl_idx, forward) {
-            return format!("{{\"type\":\"{}\",\"sec\":{},\"para\":{},\"ci\":{}}}", ty, section_idx, para_idx, ci);
+            return format!(
+                "{{\"type\":\"{}\",\"sec\":{},\"para\":{},\"ci\":{}}}",
+                ty, section_idx, para_idx, ci
+            );
         }
 
         // 2) 같은 섹션의 다른 문단 탐색
@@ -1229,13 +1639,25 @@ impl DocumentCore {
                 Box::new(std::iter::empty())
             };
             for pi in para_range {
-                let search_start = if forward { -1 } else { section.paragraphs[pi].controls.len() as i32 };
-                if let Some((ci, ty)) = find_in_para(sections, section_idx, pi, search_start, forward) {
-                    return format!("{{\"type\":\"{}\",\"sec\":{},\"para\":{},\"ci\":{}}}", ty, section_idx, pi, ci);
+                let search_start = if forward {
+                    -1
+                } else {
+                    section.paragraphs[pi].controls.len() as i32
+                };
+                if let Some((ci, ty)) =
+                    find_in_para(sections, section_idx, pi, search_start, forward)
+                {
+                    return format!(
+                        "{{\"type\":\"{}\",\"sec\":{},\"para\":{},\"ci\":{}}}",
+                        ty, section_idx, pi, ci
+                    );
                 }
                 // 네비게이션 가능한 컨트롤이 없는 문단 → body
                 if !has_navigable_control(sections, section_idx, pi) {
-                    return format!("{{\"type\":\"body\",\"sec\":{},\"para\":{}}}", section_idx, pi);
+                    return format!(
+                        "{{\"type\":\"body\",\"sec\":{},\"para\":{}}}",
+                        section_idx, pi
+                    );
                 }
             }
         }
@@ -1256,9 +1678,16 @@ impl DocumentCore {
                     Box::new((0..section.paragraphs.len()).rev())
                 };
                 for pi in para_range {
-                    let search_start = if forward { -1 } else { section.paragraphs[pi].controls.len() as i32 };
+                    let search_start = if forward {
+                        -1
+                    } else {
+                        section.paragraphs[pi].controls.len() as i32
+                    };
                     if let Some((ci, ty)) = find_in_para(sections, si, pi, search_start, forward) {
-                        return format!("{{\"type\":\"{}\",\"sec\":{},\"para\":{},\"ci\":{}}}", ty, si, pi, ci);
+                        return format!(
+                            "{{\"type\":\"{}\",\"sec\":{},\"para\":{},\"ci\":{}}}",
+                            ty, si, pi, ci
+                        );
                     }
                     if !has_navigable_control(sections, si, pi) {
                         return format!("{{\"type\":\"body\",\"sec\":{},\"para\":{}}}", si, pi);
@@ -1469,19 +1898,24 @@ impl DocumentCore {
     ) -> Result<String, HwpError> {
         let section = self.document.sections.get(section_idx).ok_or_else(|| {
             HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.document.sections.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.document.sections.len()
             ))
         })?;
         let para = section.paragraphs.get(para_idx).ok_or_else(|| {
             HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과 (총 {}개)", para_idx, section.paragraphs.len()
+                "문단 인덱스 {} 범위 초과 (총 {}개)",
+                para_idx,
+                section.paragraphs.len()
             ))
         })?;
         let text_chars: Vec<char> = para.text.chars().collect();
         let total = text_chars.len();
         if char_offset > total {
             return Err(HwpError::RenderError(format!(
-                "char_offset {} 범위 초과 (문단 길이 {})", char_offset, total
+                "char_offset {} 범위 초과 (문단 길이 {})",
+                char_offset, total
             )));
         }
         let end = (char_offset + count).min(total);
@@ -1497,43 +1931,49 @@ impl DocumentCore {
         control_idx: usize,
         cell_idx: usize,
     ) -> Result<usize, HwpError> {
-        let para = self.document.sections.get(section_idx)
-            .ok_or_else(|| HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과", section_idx
-            )))?
-            .paragraphs.get(parent_para_idx)
-            .ok_or_else(|| HwpError::RenderError(format!(
-                "문단 인덱스 {} 범위 초과", parent_para_idx
-            )))?;
+        let para = self
+            .document
+            .sections
+            .get(section_idx)
+            .ok_or_else(|| HwpError::RenderError(format!("구역 인덱스 {} 범위 초과", section_idx)))?
+            .paragraphs
+            .get(parent_para_idx)
+            .ok_or_else(|| {
+                HwpError::RenderError(format!("문단 인덱스 {} 범위 초과", parent_para_idx))
+            })?;
         match para.controls.get(control_idx) {
             Some(Control::Table(table)) => {
                 if cell_idx == 65534 {
-                    let cap = table.caption.as_ref().ok_or_else(|| {
-                        HwpError::RenderError("표에 캡션이 없습니다".to_string())
-                    })?;
+                    let cap = table
+                        .caption
+                        .as_ref()
+                        .ok_or_else(|| HwpError::RenderError("표에 캡션이 없습니다".to_string()))?;
                     return Ok(cap.paragraphs.len());
                 }
                 let cell = table.cells.get(cell_idx).ok_or_else(|| {
                     HwpError::RenderError(format!(
-                        "셀 인덱스 {} 범위 초과 (총 {}개)", cell_idx, table.cells.len()
+                        "셀 인덱스 {} 범위 초과 (총 {}개)",
+                        cell_idx,
+                        table.cells.len()
                     ))
                 })?;
                 Ok(cell.paragraphs.len())
             }
             Some(Control::Shape(shape)) => {
-                let text_box = get_textbox_from_shape(shape).ok_or_else(|| {
-                    HwpError::RenderError("도형에 글상자가 없습니다".to_string())
-                })?;
+                let text_box = get_textbox_from_shape(shape)
+                    .ok_or_else(|| HwpError::RenderError("도형에 글상자가 없습니다".to_string()))?;
                 Ok(text_box.paragraphs.len())
             }
             Some(Control::Picture(pic)) => {
-                let caption = pic.caption.as_ref().ok_or_else(|| {
-                    HwpError::RenderError("그림에 캡션이 없습니다".to_string())
-                })?;
+                let caption = pic
+                    .caption
+                    .as_ref()
+                    .ok_or_else(|| HwpError::RenderError("그림에 캡션이 없습니다".to_string()))?;
                 Ok(caption.paragraphs.len())
             }
             _ => Err(HwpError::RenderError(format!(
-                "컨트롤 인덱스 {}가 표/글상자가 아닙니다", control_idx
+                "컨트롤 인덱스 {}가 표/글상자가 아닙니다",
+                control_idx
             ))),
         }
     }
@@ -1547,12 +1987,20 @@ impl DocumentCore {
         cell_idx: usize,
         cell_para_idx: usize,
     ) -> Result<usize, HwpError> {
-        let cell_para = self.get_cell_paragraph_ref(
-            section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx,
-        ).ok_or_else(|| HwpError::RenderError(format!(
-            "셀 문단 접근 실패: sec={}, para={}, ctrl={}, cell={}, cellPara={}",
-            section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx
-        )))?;
+        let cell_para = self
+            .get_cell_paragraph_ref(
+                section_idx,
+                parent_para_idx,
+                control_idx,
+                cell_idx,
+                cell_para_idx,
+            )
+            .ok_or_else(|| {
+                HwpError::RenderError(format!(
+                    "셀 문단 접근 실패: sec={}, para={}, ctrl={}, cell={}, cellPara={}",
+                    section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx
+                ))
+            })?;
         Ok(cell_para.text.chars().count())
     }
 
@@ -1567,17 +2015,26 @@ impl DocumentCore {
         char_offset: usize,
         count: usize,
     ) -> Result<String, HwpError> {
-        let cell_para = self.get_cell_paragraph_ref(
-            section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx,
-        ).ok_or_else(|| HwpError::RenderError(format!(
-            "셀 문단 접근 실패: sec={}, para={}, ctrl={}, cell={}, cellPara={}",
-            section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx
-        )))?;
+        let cell_para = self
+            .get_cell_paragraph_ref(
+                section_idx,
+                parent_para_idx,
+                control_idx,
+                cell_idx,
+                cell_para_idx,
+            )
+            .ok_or_else(|| {
+                HwpError::RenderError(format!(
+                    "셀 문단 접근 실패: sec={}, para={}, ctrl={}, cell={}, cellPara={}",
+                    section_idx, parent_para_idx, control_idx, cell_idx, cell_para_idx
+                ))
+            })?;
         let text_chars: Vec<char> = cell_para.text.chars().collect();
         let total = text_chars.len();
         if char_offset > total {
             return Err(HwpError::RenderError(format!(
-                "char_offset {} 범위 초과 (셀 문단 길이 {})", char_offset, total
+                "char_offset {} 범위 초과 (셀 문단 길이 {})",
+                char_offset, total
             )));
         }
         let end = (char_offset + count).min(total);
@@ -1590,10 +2047,16 @@ impl DocumentCore {
     // ─── Phase 2 Native: 커서/히트 테스트 API ────────────────────
 
     /// 문단이 포함된 글로벌 페이지 번호 목록을 반환한다.
-    pub(crate) fn find_pages_for_paragraph(&self, section_idx: usize, para_idx: usize) -> Result<Vec<u32>, HwpError> {
+    pub(crate) fn find_pages_for_paragraph(
+        &self,
+        section_idx: usize,
+        para_idx: usize,
+    ) -> Result<Vec<u32>, HwpError> {
         if section_idx >= self.pagination.len() {
             return Err(HwpError::RenderError(format!(
-                "구역 인덱스 {} 범위 초과 (총 {}개)", section_idx, self.pagination.len()
+                "구역 인덱스 {} 범위 초과 (총 {}개)",
+                section_idx,
+                self.pagination.len()
             )));
         }
         let mut global_offset = 0u32;
@@ -1605,11 +2068,23 @@ impl DocumentCore {
                     for col in &page.column_contents {
                         for item in &col.items {
                             let pi = match item {
-                                crate::renderer::pagination::PageItem::FullParagraph { para_index } => Some(*para_index),
-                                crate::renderer::pagination::PageItem::PartialParagraph { para_index, .. } => Some(*para_index),
-                                crate::renderer::pagination::PageItem::Table { para_index, .. } => Some(*para_index),
-                                crate::renderer::pagination::PageItem::PartialTable { para_index, .. } => Some(*para_index),
-                                crate::renderer::pagination::PageItem::Shape { para_index, .. } => Some(*para_index),
+                                crate::renderer::pagination::PageItem::FullParagraph {
+                                    para_index,
+                                } => Some(*para_index),
+                                crate::renderer::pagination::PageItem::PartialParagraph {
+                                    para_index,
+                                    ..
+                                } => Some(*para_index),
+                                crate::renderer::pagination::PageItem::Table {
+                                    para_index, ..
+                                } => Some(*para_index),
+                                crate::renderer::pagination::PageItem::PartialTable {
+                                    para_index,
+                                    ..
+                                } => Some(*para_index),
+                                crate::renderer::pagination::PageItem::Shape {
+                                    para_index, ..
+                                } => Some(*para_index),
                             };
                             if pi == Some(para_idx) {
                                 if result.last() != Some(&global_page) {
@@ -1632,7 +2107,9 @@ impl DocumentCore {
                     for wp in &pr.wrap_around_paras {
                         if wp.para_index == para_idx {
                             // 표 호스트 문단의 페이지에서 렌더링됨
-                            if let Ok(table_pages) = self.find_pages_for_paragraph(section_idx, wp.table_para_index) {
+                            if let Ok(table_pages) =
+                                self.find_pages_for_paragraph(section_idx, wp.table_para_index)
+                            {
                                 return Ok(table_pages);
                             }
                         }
@@ -1640,7 +2117,8 @@ impl DocumentCore {
                 }
                 return if result.is_empty() {
                     Err(HwpError::RenderError(format!(
-                        "문단 (sec={}, para={})이 페이지에 없습니다", section_idx, para_idx
+                        "문단 (sec={}, para={})이 페이지에 없습니다",
+                        section_idx, para_idx
                     )))
                 } else {
                     Ok(result)
@@ -1649,10 +2127,10 @@ impl DocumentCore {
             global_offset += pr.pages.len() as u32;
         }
         Err(HwpError::RenderError(format!(
-            "구역 인덱스 {} 범위 초과", section_idx
+            "구역 인덱스 {} 범위 초과",
+            section_idx
         )))
     }
-
 }
 
 #[cfg(test)]
@@ -1660,12 +2138,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_insert_section_break_splits_document_sections() {
+        let mut core = DocumentCore::new_empty();
+        core.create_blank_document_native().unwrap();
+        core.insert_text_native(0, 0, 0, "abcdef").unwrap();
+
+        let result = core.insert_section_break_native(0, 0, 3).unwrap();
+
+        assert!(result.contains("\"ok\":true"));
+        assert_eq!(core.document.sections.len(), 2);
+        assert_eq!(core.document.doc_properties.section_count, 2);
+        assert_eq!(core.document.sections[0].paragraphs[0].text, "abc");
+        assert_eq!(core.document.sections[1].paragraphs[0].text, "def");
+    }
+
+    #[test]
+    fn test_set_page_number_pos_inserts_and_updates_control() {
+        let mut core = DocumentCore::new_empty();
+        core.create_blank_document_native().unwrap();
+
+        core.set_page_number_pos_native(0, 0, 0, 5, '-').unwrap();
+        core.set_page_number_pos_native(0, 0, 4, 2, '-').unwrap();
+
+        let page_num_controls: Vec<_> = core.document.sections[0].paragraphs[0]
+            .controls
+            .iter()
+            .filter_map(|ctrl| match ctrl {
+                Control::PageNumberPos(pnp) => Some(pnp),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(page_num_controls.len(), 1);
+        assert_eq!(page_num_controls[0].format, 4);
+        assert_eq!(page_num_controls[0].position, 2);
+        assert_eq!(page_num_controls[0].dash_char, '-');
+    }
+
+    #[test]
     fn test_page_overflow_with_enter() {
         let mut core = DocumentCore::new_empty();
         core.create_blank_document_native().unwrap();
 
         assert_eq!(core.page_count(), 1, "초기 페이지 수");
-        assert_eq!(core.document.sections[0].paragraphs.len(), 1, "초기 문단 수");
+        assert_eq!(
+            core.document.sections[0].paragraphs.len(),
+            1,
+            "초기 문단 수"
+        );
 
         // Enter를 50번 입력하여 페이지 오버플로우 유발
         for i in 0..50 {
@@ -1676,7 +2196,11 @@ mod tests {
         let para_count = core.document.sections[0].paragraphs.len();
         let page_count = core.page_count();
         assert_eq!(para_count, 51, "문단 수");
-        assert!(page_count >= 2, "페이지 수: {} (2 이상이어야 함)", page_count);
+        assert!(
+            page_count >= 2,
+            "페이지 수: {} (2 이상이어야 함)",
+            page_count
+        );
     }
 
     #[test]
@@ -1692,14 +2216,19 @@ mod tests {
         // 첫 문단이 여러 줄로 구성되는지 확인
         let para0_lines = core.composed[0][0].lines.len();
         eprintln!("문단0 줄 수: {}", para0_lines);
-        assert!(para0_lines >= 2, "첫 문단은 2줄 이상이어야 함: {}", para0_lines);
+        assert!(
+            para0_lines >= 2,
+            "첫 문단은 2줄 이상이어야 함: {}",
+            para0_lines
+        );
 
         // Enter로 문단 분리 (텍스트 끝에서)
         let text_len = core.document.sections[0].paragraphs[0].text.chars().count();
         core.split_paragraph_native(0, 0, text_len).unwrap();
 
         // 두 번째 문단에 텍스트 입력
-        core.insert_text_native(0, 1, 0, "Second paragraph").unwrap();
+        core.insert_text_native(0, 1, 0, "Second paragraph")
+            .unwrap();
 
         // 렌더 트리 빌드 (페이지 0)
         let tree = core.build_page_tree(0).unwrap();
@@ -1707,16 +2236,26 @@ mod tests {
 
         // 렌더 트리에서 문단들의 Y 좌표를 추출
         // 두 번째 문단 "Second" 텍스트가 존재하는지 확인
-        assert!(tree_str.contains("Second paragraph"),
-            "두 번째 문단 텍스트가 렌더 트리에 없음");
+        assert!(
+            tree_str.contains("Second paragraph"),
+            "두 번째 문단 텍스트가 렌더 트리에 없음"
+        );
 
         // 렌더 트리에서 TextRun Y 좌표 확인
         let para0_last_y = find_text_y(&tree.root, "dog.");
         let para1_y = find_text_y(&tree.root, "Second");
-        eprintln!("문단0 마지막줄 Y: {:?}, 문단1 Y: {:?}", para0_last_y, para1_y);
+        eprintln!(
+            "문단0 마지막줄 Y: {:?}, 문단1 Y: {:?}",
+            para0_last_y, para1_y
+        );
 
         if let (Some(y0), Some(y1)) = (para0_last_y, para1_y) {
-            assert!(y1 > y0, "문단1 Y({:.1})가 문단0 Y({:.1})보다 커야 함 (겹침 감지)", y1, y0);
+            assert!(
+                y1 > y0,
+                "문단1 Y({:.1})가 문단0 Y({:.1})보다 커야 함 (겹침 감지)",
+                y1,
+                y0
+            );
         }
     }
 
@@ -1737,7 +2276,11 @@ mod tests {
 
         let page_count = core.page_count();
         eprintln!("160% 줄간격: 문단 51개, 페이지 수: {}", page_count);
-        assert!(page_count >= 2, "160% 줄간격에서 페이지 넘김 필요: {}", page_count);
+        assert!(
+            page_count >= 2,
+            "160% 줄간격에서 페이지 넘김 필요: {}",
+            page_count
+        );
     }
 
     /// 줄간격 100%에서 160%보다 더 많은 문단이 한 페이지에 들어가는지 확인
@@ -1748,7 +2291,9 @@ mod tests {
         core100.create_blank_document_native().unwrap();
         let text = "Tight spacing test line.";
         // 첫 문단에 줄간격 100% 적용
-        core100.apply_para_format_native(0, 0, r#"{"lineSpacing":100}"#).unwrap();
+        core100
+            .apply_para_format_native(0, 0, r#"{"lineSpacing":100}"#)
+            .unwrap();
         for i in 0..50 {
             let para_count = core100.document.sections[0].paragraphs.len();
             let last = para_count - 1;
@@ -1756,7 +2301,9 @@ mod tests {
             core100.split_paragraph_native(0, last, text.len()).unwrap();
             // 새 문단에도 100% 적용
             let new_last = core100.document.sections[0].paragraphs.len() - 1;
-            core100.apply_para_format_native(0, new_last, r#"{"lineSpacing":100}"#).unwrap();
+            core100
+                .apply_para_format_native(0, new_last, r#"{"lineSpacing":100}"#)
+                .unwrap();
         }
         let pages_100 = core100.page_count();
 
@@ -1771,10 +2318,17 @@ mod tests {
         }
         let pages_160 = core160.page_count();
 
-        eprintln!("100% → {}페이지, 160% → {}페이지 (문단 51개)", pages_100, pages_160);
+        eprintln!(
+            "100% → {}페이지, 160% → {}페이지 (문단 51개)",
+            pages_100, pages_160
+        );
         // 100%는 160%보다 같거나 적은 페이지 수
-        assert!(pages_100 <= pages_160,
-            "100% 줄간격({})이 160%({})보다 적은/같은 페이지 수여야 함", pages_100, pages_160);
+        assert!(
+            pages_100 <= pages_160,
+            "100% 줄간격({})이 160%({})보다 적은/같은 페이지 수여야 함",
+            pages_100,
+            pages_160
+        );
     }
 
     /// 줄간격 300%에서 160%보다 더 빨리 페이지가 넘어가는지 확인
@@ -1784,14 +2338,18 @@ mod tests {
         let mut core300 = DocumentCore::new_empty();
         core300.create_blank_document_native().unwrap();
         let text = "Wide spacing test line.";
-        core300.apply_para_format_native(0, 0, r#"{"lineSpacing":300}"#).unwrap();
+        core300
+            .apply_para_format_native(0, 0, r#"{"lineSpacing":300}"#)
+            .unwrap();
         for i in 0..30 {
             let para_count = core300.document.sections[0].paragraphs.len();
             let last = para_count - 1;
             core300.insert_text_native(0, last, 0, text).unwrap();
             core300.split_paragraph_native(0, last, text.len()).unwrap();
             let new_last = core300.document.sections[0].paragraphs.len() - 1;
-            core300.apply_para_format_native(0, new_last, r#"{"lineSpacing":300}"#).unwrap();
+            core300
+                .apply_para_format_native(0, new_last, r#"{"lineSpacing":300}"#)
+                .unwrap();
         }
         let pages_300 = core300.page_count();
 
@@ -1806,9 +2364,16 @@ mod tests {
         }
         let pages_160 = core160.page_count();
 
-        eprintln!("300% → {}페이지, 160% → {}페이지 (문단 31개)", pages_300, pages_160);
-        assert!(pages_300 >= pages_160,
-            "300% 줄간격({})이 160%({})보다 많은/같은 페이지 수여야 함", pages_300, pages_160);
+        eprintln!(
+            "300% → {}페이지, 160% → {}페이지 (문단 31개)",
+            pages_300, pages_160
+        );
+        assert!(
+            pages_300 >= pages_160,
+            "300% 줄간격({})이 160%({})보다 많은/같은 페이지 수여야 함",
+            pages_300,
+            pages_160
+        );
     }
 
     /// 혼합 줄간격: 문단마다 다른 줄간격에서 페이지 넘김 정상 동작 확인
@@ -1833,13 +2398,25 @@ mod tests {
 
         let page_count = core.page_count();
         let para_count = core.document.sections[0].paragraphs.len();
-        eprintln!("혼합 줄간격: 문단 {}개, 페이지 수: {}", para_count, page_count);
-        assert!(page_count >= 2, "혼합 줄간격에서 페이지 넘김 필요: {}", page_count);
+        eprintln!(
+            "혼합 줄간격: 문단 {}개, 페이지 수: {}",
+            para_count, page_count
+        );
+        assert!(
+            page_count >= 2,
+            "혼합 줄간격에서 페이지 넘김 필요: {}",
+            page_count
+        );
 
         // 각 페이지에 문단이 배치되었는지 확인 (렌더 트리 빌드 가능)
         for p in 0..page_count {
             let tree = core.build_page_tree(p as u32);
-            assert!(tree.is_ok(), "페이지 {} 렌더 트리 빌드 실패: {:?}", p, tree.err());
+            assert!(
+                tree.is_ok(),
+                "페이지 {} 렌더 트리 빌드 실패: {:?}",
+                p,
+                tree.err()
+            );
         }
     }
 
@@ -1851,8 +2428,8 @@ mod tests {
 
         let text = "Fixed spacing paragraph.";
         // Fixed 줄간격 30px
-        core.apply_para_format_native(0, 0,
-            r#"{"lineSpacing":30,"lineSpacingType":"Fixed"}"#).unwrap();
+        core.apply_para_format_native(0, 0, r#"{"lineSpacing":30,"lineSpacingType":"Fixed"}"#)
+            .unwrap();
 
         for i in 0..50 {
             let para_count = core.document.sections[0].paragraphs.len();
@@ -1860,13 +2437,21 @@ mod tests {
             core.insert_text_native(0, last, 0, text).unwrap();
             core.split_paragraph_native(0, last, text.len()).unwrap();
             let new_last = core.document.sections[0].paragraphs.len() - 1;
-            core.apply_para_format_native(0, new_last,
-                r#"{"lineSpacing":30,"lineSpacingType":"Fixed"}"#).unwrap();
+            core.apply_para_format_native(
+                0,
+                new_last,
+                r#"{"lineSpacing":30,"lineSpacingType":"Fixed"}"#,
+            )
+            .unwrap();
         }
 
         let page_count = core.page_count();
         eprintln!("Fixed 줄간격: 문단 51개, 페이지 수: {}", page_count);
-        assert!(page_count >= 1, "Fixed 줄간격에서 페이지 수 확인: {}", page_count);
+        assert!(
+            page_count >= 1,
+            "Fixed 줄간격에서 페이지 수 확인: {}",
+            page_count
+        );
 
         // 렌더 트리 정상 빌드 확인
         for p in 0..page_count {
@@ -1905,10 +2490,14 @@ mod tests {
 
         // 줄간격이 클수록 페이지 수가 많아야 함
         for i in 1..page_counts.len() {
-            assert!(page_counts[i].1 >= page_counts[i-1].1,
+            assert!(
+                page_counts[i].1 >= page_counts[i - 1].1,
                 "줄간격 {}%({})가 {}%({})보다 적은 페이지 수",
-                page_counts[i].0, page_counts[i].1,
-                page_counts[i-1].0, page_counts[i-1].1);
+                page_counts[i].0,
+                page_counts[i].1,
+                page_counts[i - 1].0,
+                page_counts[i - 1].1
+            );
         }
     }
 
@@ -1946,21 +2535,35 @@ mod tests {
             let pages = core.page_count();
             if pages > prev_pages && boundary_crossed_at == 0 {
                 boundary_crossed_at = spacing;
-                eprintln!("  페이지 경계 돌파: {}% 줄간격에서 {}→{}페이지", spacing, prev_pages, pages);
+                eprintln!(
+                    "  페이지 경계 돌파: {}% 줄간격에서 {}→{}페이지",
+                    spacing, prev_pages, pages
+                );
             }
             prev_pages = pages;
         }
 
         eprintln!("최종 페이지 수: {} (줄간격 360%)", prev_pages);
-        assert!(prev_pages > initial_pages,
-            "줄간격 증가로 페이지 수 증가 필요: {} → {}", initial_pages, prev_pages);
-        assert!(boundary_crossed_at > 0,
-            "페이지 경계 돌파 시점이 감지되어야 함");
+        assert!(
+            prev_pages > initial_pages,
+            "줄간격 증가로 페이지 수 증가 필요: {} → {}",
+            initial_pages,
+            prev_pages
+        );
+        assert!(
+            boundary_crossed_at > 0,
+            "페이지 경계 돌파 시점이 감지되어야 함"
+        );
 
         // 모든 페이지 렌더 트리 정상 빌드 확인
         for p in 0..prev_pages {
             let tree = core.build_page_tree(p as u32);
-            assert!(tree.is_ok(), "페이지 {} 렌더 트리 빌드 실패: {:?}", p, tree.err());
+            assert!(
+                tree.is_ok(),
+                "페이지 {} 렌더 트리 빌드 실패: {:?}",
+                p,
+                tree.err()
+            );
         }
     }
 }
@@ -1994,34 +2597,42 @@ impl DocumentCore {
         if path.is_empty() {
             return Err(HwpError::RenderError("경로가 비어있습니다".to_string()));
         }
-        let section = self.document.sections.get_mut(section_idx)
+        let section = self
+            .document
+            .sections
+            .get_mut(section_idx)
             .ok_or_else(|| HwpError::RenderError(format!("구역 {} 범위 초과", section_idx)))?;
-        let mut para: &mut Paragraph = section.paragraphs.get_mut(parent_para_idx)
+        let mut para: &mut Paragraph = section
+            .paragraphs
+            .get_mut(parent_para_idx)
             .ok_or_else(|| HwpError::RenderError(format!("문단 {} 범위 초과", parent_para_idx)))?;
 
         for (i, &(ctrl_idx, cell_idx, cell_para_idx)) in path.iter().enumerate() {
             let table = match para.controls.get_mut(ctrl_idx) {
                 Some(Control::Table(t)) => t.as_mut(),
-                _ => return Err(HwpError::RenderError(format!(
-                    "경로[{}]: controls[{}]가 표가 아닙니다", i, ctrl_idx
-                ))),
+                _ => {
+                    return Err(HwpError::RenderError(format!(
+                        "경로[{}]: controls[{}]가 표가 아닙니다",
+                        i, ctrl_idx
+                    )))
+                }
             };
-            let cell = table.cells.get_mut(cell_idx)
-                .ok_or_else(|| HwpError::RenderError(format!(
-                    "경로[{}]: 셀 {} 범위 초과", i, cell_idx
-                )))?;
+            let cell = table.cells.get_mut(cell_idx).ok_or_else(|| {
+                HwpError::RenderError(format!("경로[{}]: 셀 {} 범위 초과", i, cell_idx))
+            })?;
             if i == path.len() - 1 {
                 // 마지막 레벨: 이 셀의 문단 반환
-                return cell.paragraphs.get_mut(cell_para_idx)
-                    .ok_or_else(|| HwpError::RenderError(format!(
-                        "경로[{}]: 셀문단 {} 범위 초과", i, cell_para_idx
-                    )));
+                return cell.paragraphs.get_mut(cell_para_idx).ok_or_else(|| {
+                    HwpError::RenderError(format!(
+                        "경로[{}]: 셀문단 {} 범위 초과",
+                        i, cell_para_idx
+                    ))
+                });
             }
             // 중간 레벨: 이 셀의 문단으로 진입 후 다음 표 탐색
-            para = cell.paragraphs.get_mut(cell_para_idx)
-                .ok_or_else(|| HwpError::RenderError(format!(
-                    "경로[{}]: 셀문단 {} 범위 초과", i, cell_para_idx
-                )))?;
+            para = cell.paragraphs.get_mut(cell_para_idx).ok_or_else(|| {
+                HwpError::RenderError(format!("경로[{}]: 셀문단 {} 범위 초과", i, cell_para_idx))
+            })?;
         }
         unreachable!()
     }
@@ -2050,9 +2661,15 @@ impl DocumentCore {
 
         let new_offset = char_offset + new_chars_count;
         self.event_log.push(DocumentEvent::CellTextChanged {
-            section: section_idx, para: parent_para_idx, ctrl: outer_ctrl, cell: path[0].1,
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: outer_ctrl,
+            cell: path[0].1,
         });
-        Ok(super::super::helpers::json_ok_with(&format!("\"charOffset\":{}", new_offset)))
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"charOffset\":{}",
+            new_offset
+        )))
     }
 
     /// path 기반 셀 텍스트 삭제 (중첩 표 지원)
@@ -2074,9 +2691,15 @@ impl DocumentCore {
         self.paginate_if_needed();
 
         self.event_log.push(DocumentEvent::CellTextChanged {
-            section: section_idx, para: parent_para_idx, ctrl: outer_ctrl, cell: path[0].1,
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: outer_ctrl,
+            cell: path[0].1,
         });
-        Ok(super::super::helpers::json_ok_with(&format!("\"charOffset\":{}", char_offset)))
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"charOffset\":{}",
+            char_offset
+        )))
     }
 
     /// path 기반 셀 문단 분할 (중첩 표 지원)
@@ -2092,9 +2715,14 @@ impl DocumentCore {
         let cell_para_idx = last.2;
 
         // 셀에 접근하여 문단 분할
-        let section = self.document.sections.get_mut(section_idx)
+        let section = self
+            .document
+            .sections
+            .get_mut(section_idx)
             .ok_or_else(|| HwpError::RenderError("구역 범위 초과".to_string()))?;
-        let mut para: &mut Paragraph = section.paragraphs.get_mut(parent_para_idx)
+        let mut para: &mut Paragraph = section
+            .paragraphs
+            .get_mut(parent_para_idx)
             .ok_or_else(|| HwpError::RenderError("문단 범위 초과".to_string()))?;
 
         // path를 따라 마지막 셀까지 진입
@@ -2103,7 +2731,9 @@ impl DocumentCore {
                 Some(Control::Table(t)) => t.as_mut(),
                 _ => return Err(HwpError::RenderError("경로: 표가 아닙니다".to_string())),
             };
-            let cell = table.cells.get_mut(cell_idx)
+            let cell = table
+                .cells
+                .get_mut(cell_idx)
                 .ok_or_else(|| HwpError::RenderError("셀 범위 초과".to_string()))?;
             if i == path.len() - 1 {
                 // 이 셀에서 문단 분할
@@ -2114,7 +2744,9 @@ impl DocumentCore {
                 cell.paragraphs.insert(cell_para_idx + 1, new_para);
                 break;
             }
-            para = cell.paragraphs.get_mut(_cpi)
+            para = cell
+                .paragraphs
+                .get_mut(_cpi)
                 .ok_or_else(|| HwpError::RenderError("셀문단 범위 초과".to_string()))?;
         }
 
@@ -2125,10 +2757,16 @@ impl DocumentCore {
         self.paginate_if_needed();
 
         self.event_log.push(DocumentEvent::CellTextChanged {
-            section: section_idx, para: parent_para_idx, ctrl: outer_ctrl, cell: path[0].1,
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: outer_ctrl,
+            cell: path[0].1,
         });
         let new_cpi = cell_para_idx + 1;
-        Ok(super::super::helpers::json_ok_with(&format!("\"cellParaIndex\":{},\"charOffset\":0", new_cpi)))
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"cellParaIndex\":{},\"charOffset\":0",
+            new_cpi
+        )))
     }
 
     /// path 기반 셀 문단 병합 (중첩 표 지원)
@@ -2141,12 +2779,19 @@ impl DocumentCore {
         let last = path.last().unwrap();
         let cell_para_idx = last.2;
         if cell_para_idx == 0 {
-            return Err(HwpError::RenderError("첫 문단은 병합할 수 없습니다".to_string()));
+            return Err(HwpError::RenderError(
+                "첫 문단은 병합할 수 없습니다".to_string(),
+            ));
         }
 
-        let section = self.document.sections.get_mut(section_idx)
+        let section = self
+            .document
+            .sections
+            .get_mut(section_idx)
             .ok_or_else(|| HwpError::RenderError("구역 범위 초과".to_string()))?;
-        let mut para: &mut Paragraph = section.paragraphs.get_mut(parent_para_idx)
+        let mut para: &mut Paragraph = section
+            .paragraphs
+            .get_mut(parent_para_idx)
             .ok_or_else(|| HwpError::RenderError("문단 범위 초과".to_string()))?;
 
         let mut merge_point = 0usize;
@@ -2155,7 +2800,9 @@ impl DocumentCore {
                 Some(Control::Table(t)) => t.as_mut(),
                 _ => return Err(HwpError::RenderError("경로: 표가 아닙니다".to_string())),
             };
-            let cell = table.cells.get_mut(cell_idx)
+            let cell = table
+                .cells
+                .get_mut(cell_idx)
                 .ok_or_else(|| HwpError::RenderError("셀 범위 초과".to_string()))?;
             if i == path.len() - 1 {
                 if cell_para_idx >= cell.paragraphs.len() {
@@ -2167,7 +2814,9 @@ impl DocumentCore {
                 prev.merge_from(&removed);
                 break;
             }
-            para = cell.paragraphs.get_mut(_cpi)
+            para = cell
+                .paragraphs
+                .get_mut(_cpi)
                 .ok_or_else(|| HwpError::RenderError("셀문단 범위 초과".to_string()))?;
         }
 
@@ -2178,10 +2827,16 @@ impl DocumentCore {
         self.paginate_if_needed();
 
         self.event_log.push(DocumentEvent::CellTextChanged {
-            section: section_idx, para: parent_para_idx, ctrl: outer_ctrl, cell: path[0].1,
+            section: section_idx,
+            para: parent_para_idx,
+            ctrl: outer_ctrl,
+            cell: path[0].1,
         });
         let prev_cpi = cell_para_idx - 1;
-        Ok(super::super::helpers::json_ok_with(&format!("\"cellParaIndex\":{},\"charOffset\":{}", prev_cpi, merge_point)))
+        Ok(super::super::helpers::json_ok_with(&format!(
+            "\"cellParaIndex\":{},\"charOffset\":{}",
+            prev_cpi, merge_point
+        )))
     }
 
     /// path 기반 셀 텍스트 조회 (중첩 표 지원)
@@ -2198,7 +2853,8 @@ impl DocumentCore {
         let total = text_chars.len();
         if char_offset > total {
             return Err(HwpError::RenderError(format!(
-                "char_offset {} 범위 초과 (셀 문단 길이 {})", char_offset, total
+                "char_offset {} 범위 초과 (셀 문단 길이 {})",
+                char_offset, total
             )));
         }
         let end = (char_offset + count).min(total);

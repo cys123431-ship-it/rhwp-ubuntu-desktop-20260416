@@ -8,8 +8,7 @@ use quick_xml::Reader;
 
 use crate::model::control::{
     AutoNumber, AutoNumberType, Bookmark, CharOverlap, Control, Equation, Field, FieldType,
-    FormObject, FormType, HiddenComment, NewNumber, PageHide, PageNumberPos, Ruby,
-    UnknownControl,
+    FormObject, FormType, HiddenComment, NewNumber, PageHide, PageNumberPos, Ruby, UnknownControl,
 };
 use crate::model::document::{Section, SectionDef};
 use crate::model::footnote::{Endnote, Footnote};
@@ -500,7 +499,9 @@ fn parse_col_pr(e: &quick_xml::events::BytesStart) -> ColumnDef {
     cd
 }
 
-fn parse_page_border_fill_empty(e: &quick_xml::events::BytesStart) -> crate::model::page::PageBorderFill {
+fn parse_page_border_fill_empty(
+    e: &quick_xml::events::BytesStart,
+) -> crate::model::page::PageBorderFill {
     let mut pbf = crate::model::page::PageBorderFill::default();
     for attr in e.attributes().flatten() {
         if attr.key.as_ref() == b"borderFillIDRef" {

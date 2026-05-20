@@ -1,10 +1,55 @@
 import type { CommandDef } from '../types';
+import type { CharProperties, ParaProperties } from '@/core/types';
 import { FieldEditDialog } from '@/ui/field-edit-dialog';
 import { FindDialog } from '@/ui/find-dialog';
 import { GotoDialog } from '@/ui/goto-dialog';
 
-/** 검색 대화상자 싱글톤 — 열려 있으면 재사용 */
 let findDialogInstance: FindDialog | null = null;
+
+type FormatClipboard = {
+  char: Partial<CharProperties>;
+  para: Partial<ParaProperties>;
+};
+
+let copiedFormat: FormatClipboard | null = null;
+
+function pickDefined<T extends Record<string, unknown>>(source: T, keys: string[]): Partial<T> {
+  const result: Partial<T> = {};
+  for (const key of keys) {
+    if (source[key] !== undefined) {
+      result[key as keyof T] = source[key] as T[keyof T];
+    }
+  }
+  return result;
+}
+
+function copyCurrentFormat(char: CharProperties, para: ParaProperties): FormatClipboard {
+  return {
+    char: pickDefined(char as Record<string, unknown>, [
+      'charShapeId', 'fontId', 'fontIds', 'fontSize',
+      'bold', 'italic', 'underline', 'strikethrough',
+      'textColor', 'shadeColor', 'emboss', 'engrave', 'outlineType',
+      'shadowType', 'shadowColor', 'shadowOffsetX', 'shadowOffsetY',
+      'subscript', 'superscript', 'underlineType', 'underlineColor',
+      'underlineShape', 'strikeColor', 'strikeShape', 'emphasisDot',
+      'ratios', 'spacings', 'relativeSizes', 'charOffsets', 'kerning',
+      'borderFillId', 'borderLeft', 'borderRight', 'borderTop', 'borderBottom',
+      'fillType', 'fillColor', 'patternColor', 'patternType',
+    ]) as Partial<CharProperties>,
+    para: pickDefined(para as Record<string, unknown>, [
+      'alignment', 'lineSpacing', 'lineSpacingType',
+      'marginLeft', 'marginRight', 'indent',
+      'spacingBefore', 'spacingAfter',
+      'headType', 'paraLevel', 'numberingId',
+      'widowOrphan', 'keepWithNext', 'keepLines', 'pageBreakBefore',
+      'fontLineHeight', 'singleLine', 'autoSpaceKrEn', 'autoSpaceKrNum',
+      'verticalAlign', 'englishBreakUnit', 'koreanBreakUnit',
+      'tabAutoLeft', 'tabAutoRight', 'tabStops', 'defaultTabSpacing',
+      'borderFillId', 'borderLeft', 'borderRight', 'borderTop', 'borderBottom',
+      'fillType', 'fillColor', 'patternColor', 'patternType', 'borderSpacing',
+    ]) as Partial<ParaProperties>,
+  };
+}
 
 export const editCommands: CommandDef[] = [
   {
@@ -32,7 +77,8 @@ export const editCommands: CommandDef[] = [
     label: '오려 두기',
     icon: 'icon-cut',
     shortcutLabel: 'Ctrl+X',
-    canExecute: (ctx) => ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
+    canExecute: (ctx) =>
+      ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
     execute(services) {
       services.getInputHandler()?.performCut();
     },
@@ -42,7 +88,8 @@ export const editCommands: CommandDef[] = [
     label: '복사하기',
     icon: 'icon-copy',
     shortcutLabel: 'Ctrl+C',
-    canExecute: (ctx) => ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
+    canExecute: (ctx) =>
+      ctx.hasDocument && (ctx.hasSelection || ctx.inPictureObjectSelection || ctx.inTableObjectSelection),
     execute(services) {
       services.getInputHandler()?.performCopy();
     },
@@ -53,8 +100,8 @@ export const editCommands: CommandDef[] = [
     icon: 'icon-paste',
     shortcutLabel: 'Ctrl+V',
     canExecute: (ctx) => ctx.hasDocument,
-    execute() {
-      document.execCommand('paste');
+    execute(services) {
+      services.getInputHandler()?.performPaste();
     },
   },
   {
@@ -62,16 +109,32 @@ export const editCommands: CommandDef[] = [
     label: '모양 복사',
     icon: 'icon-format-copy',
     shortcutLabel: 'Ctrl+Alt+C',
-    canExecute: () => false, // 미구현
-    execute() { /* TODO */ },
+    canExecute: (ctx) => ctx.hasDocument,
+    execute(services) {
+      const ih = services.getInputHandler();
+      if (!ih) return;
+
+      const selection = ih.getSelection();
+      if (copiedFormat && selection) {
+        ih.applyCharPropsToRange(selection.start, selection.end, copiedFormat.char);
+        ih.applyParaPropsToRange(selection.start, selection.end, copiedFormat.para);
+        copiedFormat = null;
+        services.eventBus.emit('document-changed');
+        return;
+      }
+
+      copiedFormat = copyCurrentFormat(ih.getCharProperties(), ih.getParaProperties());
+    },
   },
   {
     id: 'edit:delete',
     label: '지우기',
     icon: 'icon-delete',
     shortcutLabel: 'Ctrl+E',
-    canExecute: () => false, // 미구현
-    execute() { /* TODO */ },
+    canExecute: (ctx) => ctx.hasDocument && ctx.isEditable,
+    execute(services) {
+      services.getInputHandler()?.performDelete();
+    },
   },
   {
     id: 'edit:select-all',
@@ -123,13 +186,16 @@ export const editCommands: CommandDef[] = [
       if (findDialogInstance && findDialogInstance.isOpen()) {
         findDialogInstance.findNext();
       } else if (FindDialog.lastQuery) {
-        // 대화상자 없이 WASM 직접 검색
         const ih = services.getInputHandler();
         if (!ih) return;
         const pos = ih.getCursorPosition();
         const result = services.wasm.searchText(
-          FindDialog.lastQuery, pos.sectionIndex, pos.paragraphIndex,
-          pos.charOffset, true, FindDialog.lastCaseSensitive,
+          FindDialog.lastQuery,
+          pos.sectionIndex,
+          pos.paragraphIndex,
+          pos.charOffset,
+          true,
+          FindDialog.lastCaseSensitive,
         );
         if (result.found) {
           ih.moveCursorTo({
@@ -170,19 +236,20 @@ export const editCommands: CommandDef[] = [
       const ih = services.getInputHandler();
       if (!ih) return;
       const fi = (ih as any).getFieldInfo?.();
-      console.log('[field:edit] fieldInfo:', fi);
       if (!fi || fi.fieldId == null) return;
+
       const props = services.wasm.getClickHereProps(fi.fieldId);
-      console.log('[field:edit] props:', props);
       if (!props.ok) return;
 
       const dialog = new FieldEditDialog();
       dialog.onApply = (newProps) => {
-        console.log('[field:edit] apply:', newProps);
         const result = services.wasm.updateClickHereProps(
-          fi.fieldId, newProps.guide, newProps.memo, newProps.name, newProps.editable,
+          fi.fieldId,
+          newProps.guide,
+          newProps.memo,
+          newProps.name,
+          newProps.editable,
         );
-        console.log('[field:edit] updateResult:', result);
         if (result.ok) {
           services.eventBus.emit('document-changed');
         }

@@ -247,9 +247,69 @@ export class CanvasView {
 
     this.recalcLayout();
 
-    // 보이는 페이지 재렌더링
-    this.canvasPool.releaseAll();
-    this.pageRenderer.cancelAll();
+    const scrollY = this.viewportManager.getScrollY();
+    const { height: vpHeight } = this.viewportManager.getViewportSize();
+    const prefetchPages = this.virtualScroll.getPrefetchPages(scrollY, vpHeight);
+    const prefetchSet = new Set(prefetchPages);
+
+    // 1. 보이는 영역을 완전히 벗어난 페이지만 선별하여 릴리즈 (DOM에서 탈착)
+    for (const pageIdx of this.canvasPool.activePages) {
+      if (!prefetchSet.has(pageIdx)) {
+        this.pageRenderer.cancelReRender(pageIdx);
+        this.canvasPool.release(pageIdx);
+      }
+    }
+
+    // 2. 현재 보이는 페이지들 렌더링 혹은 픽셀 갱신
+    for (const pageIdx of prefetchPages) {
+      const existingCanvas = this.canvasPool.getCanvas(pageIdx);
+      if (existingCanvas) {
+        // 이미 캔버스가 존재함: DOM 노드를 떼지 않고 내용물과 스타일 위치/크기만 업데이트!
+        const zoom = this.viewportManager.getZoom();
+        const rawDpr = window.devicePixelRatio || 1;
+        const pageInfo = this.pages[pageIdx];
+        const MAX_CANVAS_PIXELS = 67108864;
+        let dpr = rawDpr;
+        if (pageInfo) {
+          const physW = pageInfo.width * zoom * dpr;
+          const physH = pageInfo.height * zoom * dpr;
+          if (physW * physH > MAX_CANVAS_PIXELS) {
+            dpr = Math.sqrt(MAX_CANVAS_PIXELS / (pageInfo.width * zoom * pageInfo.height * zoom));
+            dpr = Math.max(1, Math.floor(dpr)); // 최소 1, 정수로 내림
+          }
+        }
+        const renderScale = zoom * dpr;
+
+        // 위치 갱신
+        existingCanvas.style.top = `${this.virtualScroll.getPageOffset(pageIdx)}px`;
+        const pageLeft = this.virtualScroll.getPageLeft(pageIdx);
+        if (pageLeft >= 0) {
+          existingCanvas.style.left = `${pageLeft}px`;
+          existingCanvas.style.transform = 'none';
+        } else {
+          existingCanvas.style.left = '50%';
+          existingCanvas.style.transform = 'translateX(-50%)';
+        }
+
+        // WASM 렌더링 호출 (픽셀 갱신)
+        try {
+          this.pageRenderer.renderPage(pageIdx, existingCanvas, renderScale);
+        } catch (e) {
+          console.error(`[CanvasView] 페이지 ${pageIdx} 편집 재렌더링 실패:`, e);
+          this.canvasPool.release(pageIdx);
+          continue;
+        }
+
+        // CSS 표시 크기 업데이트
+        existingCanvas.style.width = `${existingCanvas.width / dpr}px`;
+        existingCanvas.style.height = `${existingCanvas.height / dpr}px`;
+      } else {
+        // 캔버스가 새로 필요함: 새로 할당 후 렌더링
+        this.renderPage(pageIdx);
+      }
+    }
+
+    // 3. 현재 스크롤 위치에 근거하여 페이지 번호 갱신
     this.updateVisiblePages();
   }
 

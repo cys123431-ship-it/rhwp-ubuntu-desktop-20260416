@@ -25,6 +25,11 @@ export class MenuBar {
     this.setupItemClicks();
     this.setupOutsideClose();
     this.setupKeyboardClose();
+    this.eventBus.on('command-state-changed', () => {
+      if (this.openMenu) {
+        this.updateMenuStates(this.openMenu);
+      }
+    });
   }
 
   /** 메뉴 타이틀 클릭 → 드롭다운 토글 */

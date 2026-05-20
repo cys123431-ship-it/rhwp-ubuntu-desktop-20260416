@@ -10,7 +10,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::{
+    AppHandle, DragDropEvent, Emitter, Manager, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, Window, WindowEvent,
+};
 
 #[cfg(target_os = "windows")]
 use winreg::{
@@ -50,6 +53,24 @@ struct SaveDocumentRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SaveDocumentResult {
+    file_name: String,
+    file_path: Option<String>,
+    format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveBinaryRequest {
+    suggested_name: String,
+    file_path: Option<String>,
+    format: String,
+    mime_type: String,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveBinaryResult {
     file_name: String,
     file_path: Option<String>,
     format: String,
@@ -134,6 +155,43 @@ fn format_from_path(path: &Path) -> String {
     {
         "hwpx" => "hwpx".to_string(),
         _ => "hwp".to_string(),
+    }
+}
+
+fn binary_extension_for_format(format: &str) -> &'static str {
+    match format.to_ascii_lowercase().as_str() {
+        "hwpx" => ".hwpx",
+        "pdf" => ".pdf",
+        "docx" => ".docx",
+        "jpg" | "jpeg" => ".jpg",
+        _ => ".hwp",
+    }
+}
+
+fn normalize_binary_name(file_name: &str, format: &str) -> String {
+    let extension = binary_extension_for_format(format);
+
+    if file_name.to_ascii_lowercase().ends_with(extension) {
+        file_name.to_string()
+    } else {
+        let trimmed = file_name
+            .trim_end_matches(".hwp")
+            .trim_end_matches(".hwpx")
+            .trim_end_matches(".pdf")
+            .trim_end_matches(".docx")
+            .trim_end_matches(".jpg")
+            .trim_end_matches(".jpeg");
+        format!("{trimmed}{extension}")
+    }
+}
+
+fn save_dialog_for_binary_format(dialog: rfd::FileDialog, format: &str) -> rfd::FileDialog {
+    match format.to_ascii_lowercase().as_str() {
+        "hwpx" => dialog.add_filter("HWPX documents", &["hwpx"]),
+        "pdf" => dialog.add_filter("PDF documents", &["pdf"]),
+        "docx" => dialog.add_filter("Word documents", &["docx"]),
+        "jpg" | "jpeg" => dialog.add_filter("JPEG images", &["jpg", "jpeg"]),
+        _ => dialog.add_filter("HWP documents", &["hwp"]),
     }
 }
 
@@ -285,6 +343,50 @@ fn collect_startup_files() -> Vec<OpenDocumentResult> {
     collect_startup_files_from_args(std::env::args_os().skip(1), None)
 }
 
+fn open_supported_paths(app: &AppHandle, paths: &[PathBuf]) -> Vec<OpenDocumentResult> {
+    supported_document_paths(paths)
+        .into_iter()
+        .filter_map(|path| {
+            let format = format_from_path(&path);
+            if let Err(err) = remember_recent_document(app, &path, &format) {
+                eprintln!("failed to remember dropped document: {err}");
+            }
+            match open_path(&path) {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    eprintln!("failed to open dropped document {}: {err}", path.display());
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn supported_document_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
+    paths
+        .iter()
+        .filter(|path| path_has_supported_document_extension(path))
+        .cloned()
+        .collect()
+}
+
+fn attach_document_drop_handler(app: &AppHandle, window: &WebviewWindow) {
+    let app = app.clone();
+    let label = window.label().to_string();
+    window.on_window_event(move |event| {
+        let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event else {
+            return;
+        };
+
+        let documents = open_supported_paths(&app, paths);
+        if documents.is_empty() {
+            return;
+        }
+
+        let _ = app.emit_to(label.as_str(), "rhwp://open-files", documents);
+    });
+}
+
 fn next_document_window_label(
     app: &AppHandle,
     pending: &HashMap<String, Vec<OpenDocumentResult>>,
@@ -300,13 +402,14 @@ fn next_document_window_label(
 }
 
 fn build_document_window(app: &AppHandle, label: &str) -> Result<(), String> {
-    WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title("rhwp")
         .inner_size(1440.0, 980.0)
         .min_inner_size(960.0, 720.0)
         .resizable(true)
         .build()
         .map_err(|err| err.to_string())?;
+    attach_document_drop_handler(app, &window);
     Ok(())
 }
 
@@ -635,6 +738,56 @@ fn save_document(
 }
 
 #[tauri::command]
+fn save_binary_file(request: SaveBinaryRequest) -> Result<Option<SaveBinaryResult>, String> {
+    let target_path = request.file_path.clone().map(PathBuf::from);
+
+    let selected_path = match target_path {
+        Some(path) => path,
+        None => {
+            let suggested_name = normalize_binary_name(&request.suggested_name, &request.format);
+            let picked = save_dialog_for_binary_format(
+                rfd::FileDialog::new().set_file_name(&suggested_name),
+                &request.format,
+            )
+            .save_file();
+
+            let Some(path) = picked else {
+                return Ok(None);
+            };
+            path
+        }
+    };
+
+    if let Some(parent) = selected_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+
+    fs::write(&selected_path, &request.bytes).map_err(|err| err.to_string())?;
+
+    Ok(Some(SaveBinaryResult {
+        file_name: selected_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("export")
+            .to_string(),
+        file_path: Some(selected_path.to_string_lossy().to_string()),
+        format: request.format,
+    }))
+}
+
+#[tauri::command]
+fn pick_export_directory() -> Result<Option<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .pick_folder()
+        .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn export_pdf_from_svgs(svgs: Vec<String>) -> Result<Vec<u8>, String> {
+    rhwp::renderer::pdf::svgs_to_pdf(&svgs).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn get_recent_documents(app: AppHandle) -> Result<Vec<RecentDocument>, String> {
     load_recent_documents(&app)
 }
@@ -818,6 +971,9 @@ fn main() {
             open_document_at_path,
             consume_startup_files,
             save_document,
+            save_binary_file,
+            pick_export_directory,
+            export_pdf_from_svgs,
             get_recent_documents,
             get_file_association_status,
             set_default_file_association,
@@ -828,6 +984,9 @@ fn main() {
             reveal_in_folder
         ])
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                attach_document_drop_handler(app.handle(), &window);
+            }
             let startup = app.state::<StartupFiles>();
             let handle = app.handle().clone();
             prepare_startup_windows(&handle, startup.inner()).map_err(std::io::Error::other)?;
@@ -887,6 +1046,25 @@ mod tests {
 
         assert_eq!(opened.len(), 1);
         assert_eq!(opened[0].file_name, "opened.hwp");
+
+        let _ = fs::remove_file(&supported);
+        let _ = fs::remove_file(&ignored);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn supported_document_paths_filters_unsupported_paths() {
+        let dir = std::env::temp_dir().join(format!("rhwp-drop-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let supported = dir.join("dropped.HWPX");
+        let ignored = dir.join("ignored.pdf");
+        fs::write(&supported, b"doc").unwrap();
+        fs::write(&ignored, b"pdf").unwrap();
+
+        let paths = supported_document_paths(&[supported.clone(), ignored.clone()]);
+
+        assert_eq!(paths, vec![supported.clone()]);
 
         let _ = fs::remove_file(&supported);
         let _ = fs::remove_file(&ignored);

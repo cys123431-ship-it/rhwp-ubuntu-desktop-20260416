@@ -267,6 +267,74 @@ export class SplitParagraphCommand implements EditCommand {
 
 // ─── 문단 병합 명령 (문단 시작에서 Backspace) ─────────
 
+export class InsertPageBreakCommand implements EditCommand {
+  readonly type = 'insertPageBreak';
+  readonly timestamp = Date.now();
+
+  private insertedParaIdx: number;
+  private insertedCharOffset = 0;
+
+  constructor(private position: DocumentPosition) {
+    this.insertedParaIdx = position.paragraphIndex + 1;
+  }
+
+  execute(wasm: WasmBridge): DocumentPosition {
+    const { sectionIndex: sec, paragraphIndex: para, charOffset } = this.position;
+    const result = JSON.parse(wasm.insertPageBreak(sec, para, charOffset));
+    if (result.ok) {
+      this.insertedParaIdx = result.paraIdx ?? (para + 1);
+      this.insertedCharOffset = result.charOffset ?? 0;
+      return {
+        sectionIndex: sec,
+        paragraphIndex: this.insertedParaIdx,
+        charOffset: this.insertedCharOffset,
+      };
+    }
+    return { ...this.position };
+  }
+
+  undo(wasm: WasmBridge): DocumentPosition {
+    wasm.mergeParagraph(this.position.sectionIndex, this.insertedParaIdx);
+    return { ...this.position };
+  }
+
+  mergeWith(): null { return null; }
+}
+
+export class InsertColumnBreakCommand implements EditCommand {
+  readonly type = 'insertColumnBreak';
+  readonly timestamp = Date.now();
+
+  private insertedParaIdx: number;
+  private insertedCharOffset = 0;
+
+  constructor(private position: DocumentPosition) {
+    this.insertedParaIdx = position.paragraphIndex + 1;
+  }
+
+  execute(wasm: WasmBridge): DocumentPosition {
+    const { sectionIndex: sec, paragraphIndex: para, charOffset } = this.position;
+    const result = JSON.parse(wasm.insertColumnBreak(sec, para, charOffset));
+    if (result.ok) {
+      this.insertedParaIdx = result.paraIdx ?? (para + 1);
+      this.insertedCharOffset = result.charOffset ?? 0;
+      return {
+        sectionIndex: sec,
+        paragraphIndex: this.insertedParaIdx,
+        charOffset: this.insertedCharOffset,
+      };
+    }
+    return { ...this.position };
+  }
+
+  undo(wasm: WasmBridge): DocumentPosition {
+    wasm.mergeParagraph(this.position.sectionIndex, this.insertedParaIdx);
+    return { ...this.position };
+  }
+
+  mergeWith(): null { return null; }
+}
+
 export class MergeParagraphCommand implements EditCommand {
   readonly type = 'mergeParagraph';
   readonly timestamp = Date.now();
@@ -408,6 +476,8 @@ interface ParaFormatEntry {
   endOffset: number;
   /** undo용: 적용 전 charShapeId */
   prevCharShapeId?: number;
+  /** undo용: 현재 WASM이 charShapeId 직접 복원을 지원하지 않는 경우를 위한 전체 속성 백업 */
+  prevProps?: CharProperties;
 }
 
 export class ApplyCharFormatCommand implements EditCommand {
@@ -442,7 +512,7 @@ export class ApplyCharFormatCommand implements EditCommand {
 
         // undo용 이전 서식 저장
         const prevProps = wasm.getCellCharPropertiesAt(sec, ppi, ci, cei, p, from);
-        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId });
+        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId, prevProps });
 
         wasm.applyCharFormatInCell(sec, ppi, ci, cei, p, from, to, propsJson);
       }
@@ -458,7 +528,7 @@ export class ApplyCharFormatCommand implements EditCommand {
         if (to <= from) continue;
 
         const prevProps = wasm.getCharPropertiesAt(sec, p, from);
-        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId });
+        this.entries.push({ paraIndex: p, startOffset: from, endOffset: to, prevCharShapeId: prevProps.charShapeId, prevProps });
 
         wasm.applyCharFormat(sec, p, from, to, propsJson);
       }
@@ -472,8 +542,11 @@ export class ApplyCharFormatCommand implements EditCommand {
 
     // 이전 charShapeId로 복원
     for (const entry of this.entries) {
-      if (entry.prevCharShapeId === undefined) continue;
-      const restoreJson = JSON.stringify({ charShapeId: entry.prevCharShapeId });
+      if (entry.prevCharShapeId === undefined && !entry.prevProps) continue;
+      const restoreJson = JSON.stringify({
+        ...(entry.prevProps ?? {}),
+        ...(entry.prevCharShapeId !== undefined ? { charShapeId: entry.prevCharShapeId } : {}),
+      });
 
       if (isCell(start)) {
         wasm.applyCharFormatInCell(

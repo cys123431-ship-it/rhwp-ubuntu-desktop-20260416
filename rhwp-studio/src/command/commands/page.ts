@@ -327,14 +327,8 @@ export const pageCommands: CommandDef[] = [
     shortcutLabel: 'Ctrl+Enter',
     canExecute: (ctx) => ctx.hasDocument,
     execute(services) {
-      const ih = services.getInputHandler();
-      if (!ih) return;
-      const pos = ih.getPosition();
       try {
-        const result = JSON.parse(services.wasm.insertPageBreak(pos.sectionIndex, pos.paragraphIndex, pos.charOffset));
-        if (result.ok) {
-          services.eventBus.emit('document-changed');
-        }
+        services.getInputHandler()?.performPageBreak();
       } catch (err) {
         console.warn('[page:break] 쪽 나누기 실패:', err);
       }
@@ -377,14 +371,8 @@ export const pageCommands: CommandDef[] = [
     shortcutLabel: 'Ctrl+Shift+Enter',
     canExecute: (ctx) => ctx.hasDocument,
     execute(services) {
-      const ih = services.getInputHandler();
-      if (!ih) return;
-      const pos = ih.getPosition();
       try {
-        const result = JSON.parse(services.wasm.insertColumnBreak(pos.sectionIndex, pos.paragraphIndex, pos.charOffset));
-        if (result.ok) {
-          services.eventBus.emit('document-changed');
-        }
+        services.getInputHandler()?.performColumnBreak();
       } catch (err) {
         console.warn('[page:column-break] 단 나누기 실패:', err);
       }

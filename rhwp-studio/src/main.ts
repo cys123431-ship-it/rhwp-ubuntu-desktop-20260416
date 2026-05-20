@@ -7,7 +7,7 @@ import { CanvasView } from '@/view/canvas-view';
 import { InputHandler } from '@/engine/input-handler';
 import { Toolbar } from '@/ui/toolbar';
 import { MenuBar } from '@/ui/menu-bar';
-import { loadWebFonts } from '@/core/font-loader';
+import { getDetectedOSFonts, loadWebFonts, REGISTERED_FONTS } from '@/core/font-loader';
 import { CommandRegistry } from '@/command/registry';
 import { CommandDispatcher } from '@/command/dispatcher';
 import type { EditorContext, CommandServices } from '@/command/types';
@@ -89,6 +89,7 @@ let ruler: Ruler | null = null;
 let startupFilesReceived = false;
 let recoveryTimer: number | null = null;
 let recoveryWriteInFlight = false;
+let currentPageIndex = 0;
 
 
 // ─── 커맨드 시스템 ─────────────────────────────
@@ -107,6 +108,9 @@ function getContext(): EditorContext {
     isEditable: session.hasDocument && !session.isProtected,
     isProtected: session.isProtected,
     canSave: session.hasDocument && !session.isProtected,
+    isDesktopApp: documentIO.kind === 'desktop',
+    canExportPdf: session.hasDocument && documentIO.kind === 'desktop',
+    canExportAllPagesJpg: session.hasDocument && documentIO.kind === 'desktop',
     saveFormat: session.saveFormat,
     canUndo: inputHandler?.canUndo() ?? false,
     canRedo: inputHandler?.canRedo() ?? false,
@@ -123,6 +127,7 @@ const commandServices: CommandServices = {
   getContext,
   getInputHandler: () => inputHandler,
   getViewportManager: () => canvasView?.getViewportManager() ?? null,
+  getCurrentPageIndex: () => currentPageIndex,
 };
 
 const dispatcher = new CommandDispatcher(registry, commandServices, eventBus);
@@ -390,8 +395,21 @@ function formatBannerMessages(messages: string[]): string[] {
     .filter((message) => message.length > 0);
 }
 
+function canResolveRenderedFont(fontName: string): boolean {
+  return REGISTERED_FONTS.has(fontName) || getDetectedOSFonts().has(fontName);
+}
+
+function getUnresolvedFontSubstitutions(session: DocumentSession) {
+  return session.fontSubstitutions.filter((item) => {
+    if (!item.substituted || item.resolutionKind !== 'substitute') {
+      return false;
+    }
+    return canResolveRenderedFont(item.resolved);
+  });
+}
+
 function formatFontSubstitutionSummary(session: DocumentSession): string | null {
-  const substitutedFonts = session.fontSubstitutions.filter((item) => item.substituted);
+  const substitutedFonts = getUnresolvedFontSubstitutions(session);
   if (substitutedFonts.length === 0) {
     return null;
   }
@@ -433,7 +451,12 @@ function renderSessionBanner(): void {
     parts.push(`보호 보기: ${formatBannerMessages(session.blockers).join(' ')}`);
   }
   if (session.hasDocument && session.warnings.length > 0) {
-    parts.push(formatBannerMessages(session.warnings).join(' '));
+    const filteredWarnings = session.warnings.filter((message) => (
+      message.trim() !== 'Layout may differ if required Hancom fonts are missing on this system.'
+    ));
+    if (filteredWarnings.length > 0) {
+      parts.push(formatBannerMessages(filteredWarnings).join(' '));
+    }
   }
   if (session.hasDocument) {
     const fontSummary = formatFontSubstitutionSummary(session);
@@ -539,16 +562,16 @@ async function maybeRecoverOpenResult(
   }
 }
 
-async function maybeRestoreUntitledRecovery(): Promise<void> {
+async function maybeRestoreUntitledRecovery(): Promise<boolean> {
   if (documentIO.kind !== 'desktop' || documentSession.current.hasDocument || startupFilesReceived) {
-    return;
+    return false;
   }
 
   try {
     const snapshots = await documentIO.listRecoverySnapshots();
     const snapshotMeta = snapshots.find((snapshot) => !snapshot.filePath);
     if (!snapshotMeta) {
-      return;
+      return false;
     }
 
     const shouldRecover = await showConfirm(
@@ -556,12 +579,12 @@ async function maybeRestoreUntitledRecovery(): Promise<void> {
       `저장되지 않은 자동 복구 문서가 있습니다.\n\n문서: ${snapshotMeta.fileName}\n시각: ${snapshotMeta.updatedAt}\n\n복구할까요?`,
     );
     if (!shouldRecover) {
-      return;
+      return false;
     }
 
     const snapshot = await documentIO.readRecoverySnapshot(snapshotMeta.id);
     if (!snapshot) {
-      return;
+      return false;
     }
 
     const docInfo = wasm.loadDocument(
@@ -586,8 +609,11 @@ async function maybeRestoreUntitledRecovery(): Promise<void> {
       snapshot.id,
     );
     await rememberCurrentDocument();
+    return true;
+    return true;
   } catch (error) {
     console.warn('[desktop] untitled recovery:', error);
+    return false;
   }
 }
 
@@ -736,7 +762,7 @@ async function initialize(): Promise<void> {
     setupFileInput();
     setupZoomControls();
     setupEventListeners();
-    setupDocumentIOListeners();
+    await setupDocumentIOListeners();
     setupGlobalShortcuts();
     void refreshDesktopAssociationStatus();
     if (recoveryTimer === null) {
@@ -744,12 +770,10 @@ async function initialize(): Promise<void> {
         void persistRecoverySnapshot();
       }, 30000);
     }
-    if (!new URLSearchParams(window.location.search).has('url')) {
-      window.setTimeout(() => {
-        void maybeRestoreUntitledRecovery();
-      }, 600);
+    const loadedFromUrl = await loadFromUrlParam();
+    if (!loadedFromUrl) {
+      await ensureStartupDocument();
     }
-    loadFromUrlParam();
 
     // E2E 테스트용 전역 노출 (개발 모드 전용)
     if (import.meta.env.DEV) {
@@ -782,7 +806,7 @@ function setupGlobalShortcuts(): void {
       if (e.key === 'n' || e.key === 'N' || e.key === 'ㅜ') {
         e.preventDefault();
         dispatcher.dispatch('file:new-doc');
-        return;
+        return true;
       }
     }
   }, false);
@@ -839,7 +863,7 @@ function setupFileInput(): void {
   });
 }
 
-function setupDocumentIOListeners(): void {
+async function setupDocumentIOListeners(): Promise<void> {
   const openIncomingFiles = async (files: OpenDocumentResult[]): Promise<void> => {
     startupFilesReceived = files.length > 0;
     const first = files[0];
@@ -878,14 +902,12 @@ function setupDocumentIOListeners(): void {
     }
   });
 
-  void (async () => {
-    try {
-      const startupFiles = await documentIO.consumeStartupFiles();
-      await openIncomingFiles(startupFiles);
-    } catch (error) {
-      console.error('[desktop] failed to consume startup files', error);
-    }
-  })();
+  try {
+    const startupFiles = await documentIO.consumeStartupFiles();
+    await openIncomingFiles(startupFiles);
+  } catch (error) {
+    console.error('[desktop] failed to consume startup files', error);
+  }
 }
 
 function setupZoomControls(): void {
@@ -965,6 +987,7 @@ function setupEventListeners(): void {
 
   eventBus.on('current-page-changed', (page, _total) => {
     const pageIdx = page as number;
+    currentPageIndex = pageIdx;
     sbPage().textContent = `${pageIdx + 1} / ${_total} 쪽`;
 
     // 구역 정보: 현재 페이지의 sectionIndex로 갱신
@@ -1130,10 +1153,11 @@ eventBus.on('equation-edit-request', () => {
  * URL 파라미터(?url=)로 전달된 HWP 파일을 자동 로드한다.
  * Chrome 확장 프로그램에서 뷰어 탭을 열 때 사용.
  */
-async function loadFromUrlParam(): Promise<void> {
+async function loadFromUrlParam(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search);
   const fileUrl = params.get('url');
-  if (!fileUrl) return;
+  if (!fileUrl) return false;
+  if (documentSession.current.hasDocument) return true;
 
   const fileName = params.get('filename') || fileUrl.split('/').pop()?.split('?')[0] || 'document.hwp';
   const msg = sbMessage();
@@ -1155,7 +1179,7 @@ async function loadFromUrlParam(): Promise<void> {
         const data = new Uint8Array(result.data);
         const docInfo = wasm.loadDocument(data, fileName);
         await initializeDocument(docInfo, `${fileName} — ${docInfo.pageCount}페이지`);
-        return;
+        return true;
       }
     } else {
       response = await fetch(fileUrl);
@@ -1170,7 +1194,22 @@ async function loadFromUrlParam(): Promise<void> {
     const errMsg = `파일 로드 실패: ${error}`;
     msg.textContent = errMsg;
     console.error('[loadFromUrlParam]', error);
+    return false;
   }
+  return true;
+}
+
+async function ensureStartupDocument(): Promise<void> {
+  if (documentSession.current.hasDocument || wasm.pageCount > 0) {
+    return;
+  }
+
+  const restored = await maybeRestoreUntitledRecovery();
+  if (restored || documentSession.current.hasDocument || wasm.pageCount > 0) {
+    return;
+  }
+
+  await createNewDocument();
 }
 
 installE2EBridge();
