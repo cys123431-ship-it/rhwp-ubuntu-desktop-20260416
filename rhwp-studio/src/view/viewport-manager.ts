@@ -11,6 +11,10 @@ export class ViewportManager {
   private onScrollBound: () => void;
   private onWheelBound: (e: WheelEvent) => void;
 
+  // Cached DOM properties to prevent layout thrashing
+  private containerRect: DOMRect | null = null;
+  private scrollContentWidth = 0;
+
   constructor(private eventBus: EventBus) {
     this.onScrollBound = this.onScroll.bind(this);
     this.onWheelBound = this.onWheel.bind(this);
@@ -28,6 +32,9 @@ export class ViewportManager {
       this.eventBus.emit('viewport-resize', this.viewportWidth, this.viewportHeight);
     });
     this.resizeObserver.observe(container);
+    // Observe scroll-content if exists
+    const sc = container.querySelector('#scroll-content');
+    if (sc) this.resizeObserver.observe(sc);
     this.updateViewportSize();
   }
 
@@ -64,6 +71,14 @@ export class ViewportManager {
     if (!this.container) return;
     this.viewportWidth = this.container.clientWidth;
     this.viewportHeight = this.container.clientHeight;
+    this.containerRect = this.container.getBoundingClientRect();
+    
+    const sc = this.container.querySelector('#scroll-content');
+    if (sc) {
+      this.scrollContentWidth = sc.clientWidth;
+    } else {
+      this.scrollContentWidth = this.viewportWidth;
+    }
   }
 
   getScrollY(): number {
@@ -72,6 +87,27 @@ export class ViewportManager {
 
   getScrollX(): number {
     return this.scrollX;
+  }
+
+  getContentWidth(): number {
+    return this.scrollContentWidth;
+  }
+
+  getContentX(clientX: number): number {
+    if (!this.containerRect) return 0;
+    return (clientX - this.containerRect.left) + this.scrollX;
+  }
+
+  getContentY(clientY: number): number {
+    if (!this.containerRect) return 0;
+    return (clientY - this.containerRect.top) + this.scrollY;
+  }
+
+  getContainerRect(): DOMRect {
+    if (!this.containerRect) {
+      this.containerRect = this.container?.getBoundingClientRect() ?? new DOMRect();
+    }
+    return this.containerRect;
   }
 
   getViewportSize(): { width: number; height: number } {

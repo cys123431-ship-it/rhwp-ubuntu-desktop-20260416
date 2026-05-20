@@ -203,7 +203,7 @@ export const editCommands: CommandDef[] = [
             paragraphIndex: result.para!,
             charOffset: result.charOffset!,
           });
-          const cursor = (ih as any).cursor;
+          const cursor = ih.cursor;
           if (cursor) {
             cursor.setAnchor();
             cursor.moveTo({
@@ -212,7 +212,7 @@ export const editCommands: CommandDef[] = [
               charOffset: result.charOffset! + result.length!,
             });
           }
-          (ih as any).updateCaret?.();
+          ih.updateCaret?.();
         }
       }
     },
@@ -235,7 +235,7 @@ export const editCommands: CommandDef[] = [
     execute(services) {
       const ih = services.getInputHandler();
       if (!ih) return;
-      const fi = (ih as any).getFieldInfo?.();
+      const fi = ih.getFieldInfo?.();
       if (!fi || fi.fieldId == null) return;
 
       const props = services.wasm.getClickHereProps(fi.fieldId);
@@ -268,7 +268,7 @@ export const editCommands: CommandDef[] = [
     canExecute: (ctx) => ctx.hasDocument && ctx.inField,
     execute(services) {
       const ih = services.getInputHandler();
-      if (ih) (ih as any).removeCurrentField();
+      if (ih) ih.removeCurrentField();
     },
   },
 ];

@@ -435,13 +435,12 @@ export function updatePictureMoveDrag(this: any, e: MouseEvent): void {
   const zoom = this.viewportManager.getZoom();
   const sc = this.container.querySelector('#scroll-content');
   if (!sc) return;
-  const cr = sc.getBoundingClientRect();
-  const cx = e.clientX - cr.left;
-  const cy = e.clientY - cr.top;
+  const cx = this.viewportManager.getContentX(e.clientX);
+    const cy = this.viewportManager.getContentY(e.clientY);
   const pi = this.virtualScroll.getPageAtY(cy);
   const po = this.virtualScroll.getPageOffset(pi);
   const pw = this.virtualScroll.getPageWidth(pi);
-  const pl = (sc.clientWidth - pw) / 2;
+  const pl = (this.viewportManager.getContentWidth() - pw) / 2;
   const px = (cx - pl) / zoom;
   const py = (cy - po) / zoom;
 
@@ -508,9 +507,8 @@ export function updatePictureRotateDrag(this: any, e: MouseEvent): void {
   if (!this.pictureRotateState) return;
   const sc = this.container.querySelector('#scroll-content');
   if (!sc) return;
-  const cr = sc.getBoundingClientRect();
-  const mx = e.clientX - cr.left;
-  const my = e.clientY - cr.top;
+  const mx = this.viewportManager.getContentX(e.clientX);
+  const my = this.viewportManager.getContentY(e.clientY);
 
   const s = this.pictureRotateState;
   const currentAngle = Math.atan2(my - s.centerY, mx - s.centerX);
