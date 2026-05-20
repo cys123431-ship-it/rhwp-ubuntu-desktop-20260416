@@ -9,6 +9,18 @@
   border-bottom: 1px solid #c8c8c8;
   flex-shrink: 0;
   height: 56px;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox 스크롤바 숨김 */
+  -ms-overflow-style: none; /* IE/Edge 스크롤바 숨김 */
+}
+#icon-toolbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari 스크롤바 숨김 */
+}
+
+/* 툴바 내에 스플릿 메뉴나 스타일바 드롭다운, 색상 선택창이 열렸을 때는 overflow를 visible로 복구해 잘림 현상 원천 차단 */
+#icon-toolbar:has(.tb-split.open),
+#icon-toolbar:has(.sb-dropdown.open),
+#icon-toolbar:has(.sb-color-wrap.open) {
   overflow: visible;
 }
 

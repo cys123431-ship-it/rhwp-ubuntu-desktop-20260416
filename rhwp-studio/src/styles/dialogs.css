@@ -53,6 +53,8 @@
 
 .dialog-body {
   padding: 12px;
+  max-height: 65vh;
+  overflow-y: auto;
 }
 
 .dialog-section {

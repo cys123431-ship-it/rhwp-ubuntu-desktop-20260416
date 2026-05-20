@@ -18,9 +18,12 @@ const THIRD_PARTY_LICENSES = [
   { name: 'console_error_panic_hook', license: 'MIT / Apache-2.0' },
 ];
 
-const DESKTOP_RELEASE_VERSION = '0.1.9';
+const DESKTOP_RELEASE_VERSION = '0.1.10';
 
 const RELEASE_HIGHLIGHTS = [
+  '서식 도구 모음(스타일바) 내 스타일, 글꼴, 줄간격 콤보박스의 가로 너비 확장 적용 (글자 짤림 방지)',
+  '제품 정보창을 포함한 모든 다이얼로그 본문에 세로 비율 제한 및 유연한 세로 스크롤 제공 (닫기 버튼 이탈 수정)',
+  '도구 상자(아이콘 툴바) 창 축소 시 가로 스크롤 지원 및 스플릿 드롭다운 잘림 방지 dynamic overflow 가시성 보정',
   'Shift+= 입력으로 + 문자를 쓸 때 화면 확대 단축키가 실행되던 문제를 수정',
   'HOP 데스크톱 구조 검토를 반영해 Windows/Ubuntu 앱 창에 HWP/HWPX 파일 끌어놓기 열기 추가',
   '앱 아이콘과 GitHub README 로고를 새 금속 한글 심볼 아이콘으로 교체',
