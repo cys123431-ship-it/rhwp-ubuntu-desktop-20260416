@@ -18,9 +18,10 @@ const THIRD_PARTY_LICENSES = [
   { name: 'console_error_panic_hook', license: 'MIT / Apache-2.0' },
 ];
 
-const DESKTOP_RELEASE_VERSION = '0.1.10';
+const DESKTOP_RELEASE_VERSION = '0.1.11';
 
 const RELEASE_HIGHLIGHTS = [
+  '본문 타이핑 시 화면 전체가 깜빡이던 번쩍임 현상 완치 (더블 버퍼링 기법 도입)',
   '서식 도구 모음(스타일바) 내 스타일, 글꼴, 줄간격 콤보박스의 가로 너비 확장 적용 (글자 짤림 방지)',
   '제품 정보창을 포함한 모든 다이얼로그 본문에 세로 비율 제한 및 유연한 세로 스크롤 제공 (닫기 버튼 이탈 수정)',
   '도구 상자(아이콘 툴바) 창 축소 시 가로 스크롤 지원 및 스플릿 드롭다운 잘림 방지 dynamic overflow 가시성 보정',
