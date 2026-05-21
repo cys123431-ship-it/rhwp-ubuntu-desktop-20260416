@@ -195,6 +195,48 @@ fn save_dialog_for_binary_format(dialog: rfd::FileDialog, format: &str) -> rfd::
     }
 }
 
+fn validate_safe_path(app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
+    // 1. Null byte check
+    if path.to_string_lossy().contains('\0') {
+        return Err("Path contains invalid characters (null byte)".to_string());
+    }
+
+    // 2. Normalize and check for path traversal
+    let canonical_path = if path.exists() {
+        fs::canonicalize(path).map_err(|err| format!("Path normalization failed: {err}"))?
+    } else if let Some(parent) = path.parent() {
+        if parent.exists() {
+            let canonical_parent = fs::canonicalize(parent).map_err(|err| format!("Parent path normalization failed: {err}"))?;
+            let file_name = path.file_name().ok_or_else(|| "Invalid file name".to_string())?;
+            canonical_parent.join(file_name)
+        } else {
+            return Err("Parent directory does not exist".to_string());
+        }
+    } else {
+        return Err("Invalid path structure".to_string());
+    };
+
+    // 3. Sandbox boundary verification (HOME & App Data Directories)
+    let home = app.path().home_dir().map_err(|err| format!("Failed to get home directory: {err}"))?;
+    let canonical_home = fs::canonicalize(&home).unwrap_or(home);
+
+    let app_data = app.path().app_data_dir().unwrap_or_default();
+    let canonical_app_data = if app_data.exists() {
+        fs::canonicalize(&app_data).unwrap_or(app_data)
+    } else {
+        app_data
+    };
+
+    let in_home = canonical_path.starts_with(&canonical_home);
+    let in_app_data = !canonical_app_data.as_os_str().is_empty() && canonical_path.starts_with(&canonical_app_data);
+
+    if !in_home && !in_app_data {
+        return Err("Security Violation: Path is outside the allowed sandbox".to_string());
+    }
+
+    Ok(canonical_path)
+}
+
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
     fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
@@ -663,6 +705,7 @@ fn open_document(app: AppHandle) -> Result<Option<OpenDocumentResult>, String> {
         return Ok(None);
     };
 
+    let path = validate_safe_path(&app, &path)?;
     let format = format_from_path(&path);
     remember_recent_document(&app, &path, &format)?;
     open_path(&path).map(Some)
@@ -670,7 +713,8 @@ fn open_document(app: AppHandle) -> Result<Option<OpenDocumentResult>, String> {
 
 #[tauri::command]
 fn open_document_at_path(app: AppHandle, path: String) -> Result<OpenDocumentResult, String> {
-    let path = PathBuf::from(path);
+    let raw_path = PathBuf::from(path);
+    let path = validate_safe_path(&app, &raw_path)?;
     if !path_has_supported_document_extension(&path) {
         return Err("unsupported document path".to_string());
     }
@@ -719,6 +763,8 @@ fn save_document(
         }
     };
 
+    let selected_path = validate_safe_path(&app, &selected_path)?;
+
     if let Some(parent) = selected_path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
@@ -738,7 +784,7 @@ fn save_document(
 }
 
 #[tauri::command]
-fn save_binary_file(request: SaveBinaryRequest) -> Result<Option<SaveBinaryResult>, String> {
+fn save_binary_file(app: AppHandle, request: SaveBinaryRequest) -> Result<Option<SaveBinaryResult>, String> {
     let target_path = request.file_path.clone().map(PathBuf::from);
 
     let selected_path = match target_path {
@@ -757,6 +803,8 @@ fn save_binary_file(request: SaveBinaryRequest) -> Result<Option<SaveBinaryResul
             path
         }
     };
+
+    let selected_path = validate_safe_path(&app, &selected_path)?;
 
     if let Some(parent) = selected_path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;

@@ -114,6 +114,8 @@ export class Toolbar {
       e.preventDefault();
       e.stopPropagation();
       this.charfxDropdown.classList.toggle('open');
+      const open = this.charfxDropdown.classList.contains('open');
+      this.charfxBtn.setAttribute('aria-expanded', String(open));
     });
 
     // 메뉴 항목 클릭 → 커맨드 디스패치 + 닫기
@@ -127,12 +129,16 @@ export class Toolbar {
         this.dispatcher.dispatch(`format:${fmt}`);
       }
       this.charfxDropdown.classList.remove('open');
+      this.charfxBtn.setAttribute('aria-expanded', 'false');
     });
 
     // 외부 클릭 시 닫기
     document.addEventListener('mousedown', (e) => {
       if (!this.charfxDropdown.contains(e.target as Node)) {
-        this.charfxDropdown.classList.remove('open');
+        if (this.charfxDropdown.classList.contains('open')) {
+          this.charfxDropdown.classList.remove('open');
+          this.charfxBtn.setAttribute('aria-expanded', 'false');
+        }
       }
     });
   }
@@ -335,6 +341,7 @@ export class Toolbar {
       this.highlightBar.style.background = '#ffffff';
       this.eventBus.emit('format-char', { shadeColor: '#ffffff' } as CharProperties);
       this.highlightDropdown.classList.remove('open');
+      this.btnHighlight.setAttribute('aria-expanded', 'false');
     });
     const btnOther = document.createElement('button');
     btnOther.textContent = '다른 색...';
@@ -352,6 +359,7 @@ export class Toolbar {
       this.highlightBar.style.background = this.highlightColor;
       this.eventBus.emit('format-char', { shadeColor: this.highlightColor } as CharProperties);
       this.highlightDropdown.classList.remove('open');
+      this.btnHighlight.setAttribute('aria-expanded', 'false');
     });
     actRow.appendChild(btnNone);
     actRow.appendChild(btnOther);
@@ -371,6 +379,7 @@ export class Toolbar {
           this.highlightBar.style.background = color;
           this.eventBus.emit('format-char', { shadeColor: color } as CharProperties);
           this.highlightDropdown.classList.remove('open');
+          this.btnHighlight.setAttribute('aria-expanded', 'false');
         });
         rowEl.appendChild(swatch);
       }
@@ -382,12 +391,17 @@ export class Toolbar {
       e.preventDefault();
       e.stopPropagation();
       this.highlightDropdown.classList.toggle('open');
+      const open = this.highlightDropdown.classList.contains('open');
+      this.btnHighlight.setAttribute('aria-expanded', String(open));
     });
 
     // 외부 클릭 시 닫기
     document.addEventListener('mousedown', (e) => {
       if (!this.highlightDropdown.contains(e.target as Node)) {
-        this.highlightDropdown.classList.remove('open');
+        if (this.highlightDropdown.classList.contains('open')) {
+          this.highlightDropdown.classList.remove('open');
+          this.btnHighlight.setAttribute('aria-expanded', 'false');
+        }
       }
     });
   }
@@ -499,6 +513,18 @@ export class Toolbar {
       const val = Math.round(props.lineSpacing);
       this.ensureLsOption(val);
       this.lsSelect.value = String(val);
+    }
+
+    // 문단 정렬 상태 업데이트
+    if (props.alignment !== undefined) {
+      const aligns = ['left', 'center', 'right', 'justify', 'distribute', 'split'];
+      for (const align of aligns) {
+        const btn = this.container.querySelector(`#btn-align-${align}`) as HTMLElement | null;
+        if (btn) {
+          const active = props.alignment === align;
+          this.setActive(btn, active);
+        }
+      }
     }
   }
 
@@ -614,6 +640,7 @@ export class Toolbar {
 
   private setActive(btn: HTMLElement, active: boolean): void {
     btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
   }
 
   /** 대표 글꼴 optgroup을 #font-name 드롭다운에 추가 */

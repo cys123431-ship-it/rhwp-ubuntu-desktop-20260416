@@ -156,11 +156,14 @@ export class CanvasView {
     // 그리드 모드: 고정 left 좌표, 단일 열: CSS 중앙 정렬
     const pageLeft = this.virtualScroll.getPageLeft(pageIdx);
     if (pageLeft >= 0) {
-      canvas.style.left = `${pageLeft}px`;
+      canvas.style.left = `${Math.round(pageLeft)}px`;
       canvas.style.transform = 'none';
     } else {
-      canvas.style.left = '50%';
-      canvas.style.transform = 'translateX(-50%)';
+      const parentWidth = this.scrollContent.clientWidth;
+      const cssWidth = pageInfo ? pageInfo.width * zoom : canvas.width / dpr;
+      const calculatedLeft = Math.max(0, Math.floor((parentWidth - cssWidth) / 2));
+      canvas.style.left = `${calculatedLeft}px`;
+      canvas.style.transform = 'none';
     }
 
     this.scrollContent.appendChild(canvas);
@@ -284,11 +287,14 @@ export class CanvasView {
         existingCanvas.style.top = `${this.virtualScroll.getPageOffset(pageIdx)}px`;
         const pageLeft = this.virtualScroll.getPageLeft(pageIdx);
         if (pageLeft >= 0) {
-          existingCanvas.style.left = `${pageLeft}px`;
+          existingCanvas.style.left = `${Math.round(pageLeft)}px`;
           existingCanvas.style.transform = 'none';
         } else {
-          existingCanvas.style.left = '50%';
-          existingCanvas.style.transform = 'translateX(-50%)';
+          const parentWidth = this.scrollContent.clientWidth;
+          const cssWidth = pageInfo ? pageInfo.width * zoom : existingCanvas.width / dpr;
+          const calculatedLeft = Math.max(0, Math.floor((parentWidth - cssWidth) / 2));
+          existingCanvas.style.left = `${calculatedLeft}px`;
+          existingCanvas.style.transform = 'none';
         }
 
         // WASM 렌더링 호출 (픽셀 갱신)

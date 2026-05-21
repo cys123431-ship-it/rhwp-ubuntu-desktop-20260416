@@ -48,10 +48,12 @@
 
 #scroll-content canvas {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   background: var(--color-surface);
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #scroll-content.grid-mode canvas {
