@@ -18,7 +18,7 @@ const THIRD_PARTY_LICENSES = [
   { name: 'console_error_panic_hook', license: 'MIT / Apache-2.0' },
 ];
 
-const DESKTOP_RELEASE_VERSION = '0.1.11';
+const DESKTOP_RELEASE_VERSION = '0.1.12';
 
 const RELEASE_HIGHLIGHTS = [
   '본문 타이핑 시 화면 전체가 깜빡이던 번쩍임 현상 완치 (더블 버퍼링 기법 도입)',
