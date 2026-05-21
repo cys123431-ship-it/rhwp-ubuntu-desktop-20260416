@@ -18,7 +18,8 @@ const THIRD_PARTY_LICENSES = [
   { name: 'console_error_panic_hook', license: 'MIT / Apache-2.0' },
 ];
 
-const DESKTOP_RELEASE_VERSION = '0.1.12';
+declare const __DESKTOP_VERSION__: string;
+const DESKTOP_RELEASE_VERSION = __DESKTOP_VERSION__;
 
 const RELEASE_HIGHLIGHTS = [
   '본문 타이핑 시 화면 전체가 깜빡이던 번쩍임 현상 완치 (더블 버퍼링 기법 도입)',
@@ -131,17 +132,11 @@ export class AboutDialog extends ModalDialog {
     // 정보 표시용 대화상자이므로 확인 동작 없음
   }
 
-  override show(): void {
-    super.show();
-    // footer를 닫기 버튼 하나로 교체
-    const footer = this.dialog.querySelector('.dialog-footer');
-    if (footer) {
-      footer.innerHTML = '';
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'dialog-btn dialog-btn-primary';
-      closeBtn.textContent = '닫기';
-      closeBtn.addEventListener('click', () => this.hide());
-      footer.appendChild(closeBtn);
-    }
+  protected override createFooterButtons(): HTMLElement[] {
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'dialog-btn dialog-btn-primary';
+    closeBtn.textContent = '닫기';
+    closeBtn.addEventListener('click', () => this.hide());
+    return [closeBtn];
   }
 }

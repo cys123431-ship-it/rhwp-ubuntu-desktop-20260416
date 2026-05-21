@@ -49,21 +49,10 @@ export abstract class ModalDialog {
     const footer = document.createElement('div');
     footer.className = 'dialog-footer';
 
-    const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'dialog-btn dialog-btn-primary';
-    confirmBtn.textContent = '확인';
-    confirmBtn.addEventListener('click', () => {
-      const shouldClose = this.onConfirm();
-      if (shouldClose !== false) this.hide();
-    });
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'dialog-btn';
-    cancelBtn.textContent = '취소';
-    cancelBtn.addEventListener('click', () => this.hide());
-
-    footer.appendChild(confirmBtn);
-    footer.appendChild(cancelBtn);
+    const buttons = this.createFooterButtons();
+    for (const btn of buttons) {
+      footer.appendChild(btn);
+    }
     this.dialog.appendChild(footer);
 
     this.overlay.appendChild(this.dialog);
@@ -125,4 +114,22 @@ export abstract class ModalDialog {
 
   /** 서브클래스에서 확인 버튼 동작 구현. false 반환 시 대화상자 유지 */
   protected abstract onConfirm(): void | boolean;
+
+  /** 하단 영역 버튼 생성 훅. 기본값은 [확인, 취소] */
+  protected createFooterButtons(): HTMLElement[] {
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'dialog-btn dialog-btn-primary';
+    confirmBtn.textContent = '확인';
+    confirmBtn.addEventListener('click', () => {
+      const shouldClose = this.onConfirm();
+      if (shouldClose !== false) this.hide();
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'dialog-btn';
+    cancelBtn.textContent = '취소';
+    cancelBtn.addEventListener('click', () => this.hide());
+
+    return [confirmBtn, cancelBtn];
+  }
 }
