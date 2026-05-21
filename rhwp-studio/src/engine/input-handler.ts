@@ -56,6 +56,8 @@ export class InputHandler {
   // 마우스 드래그 선택 상태
   private isDragging = false;
   private dragRafId = 0; // requestAnimationFrame throttle용
+  private autoScrollRafId = 0; // 자동 스크롤 루프용
+  private lastDragEvent: MouseEvent | null = null;
 
   // 표 경계선 hover 상태
   private resizeHoverRafId = 0;
