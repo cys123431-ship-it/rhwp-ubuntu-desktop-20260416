@@ -996,6 +996,11 @@ fn reveal_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn force_close_window(window: tauri::Window) {
+    let _ = window.destroy();
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -1029,7 +1034,8 @@ fn main() {
             read_recovery_snapshot,
             write_recovery_snapshot,
             delete_recovery_snapshot,
-            reveal_in_folder
+            reveal_in_folder,
+            force_close_window
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {

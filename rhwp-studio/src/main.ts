@@ -523,14 +523,31 @@ let desktopCloseHandling = false;
 let desktopCloseGuardInstalled = false;
 let bypassNextDesktopClosePrompt = false;
 
-function getCurrentTauriWindow():
-  | { onCloseRequested: (handler: (event: { preventDefault: () => void }) => void | Promise<void>) => Promise<() => void>; destroy: () => Promise<void> }
-  | null {
-  return window.__TAURI__?.window?.getCurrentWindow?.() ?? null;
+function getCurrentTauriWindow(): any {
+  const tauri = (window as any).__TAURI__;
+  return tauri?.window?.getCurrentWindow?.() 
+    ?? tauri?.webviewWindow?.getCurrentWebviewWindow?.() 
+    ?? null;
 }
 
 async function closeDesktopWindow(): Promise<void> {
-  await getCurrentTauriWindow()?.destroy();
+  const tauri = (window as any).__TAURI__;
+  if (tauri?.core?.invoke) {
+    try {
+      await tauri.core.invoke('force_close_window');
+      return;
+    } catch (error) {
+      console.error('[desktop] force_close_window failed:', error);
+    }
+  }
+
+  const win = getCurrentTauriWindow();
+  if (!win) return;
+  if (typeof win.destroy === 'function') {
+    try { await win.destroy(); } catch (e) { console.error(e); }
+  } else if (typeof win.close === 'function') {
+    try { await win.close(); } catch (e) { console.error(e); }
+  }
 }
 
 async function handleDesktopCloseRequest(): Promise<void> {
@@ -566,6 +583,8 @@ async function handleDesktopCloseRequest(): Promise<void> {
     if (saved) {
       await closeDesktopWindow();
     }
+  } catch (error) {
+    console.error('[desktop] handle close request failed:', error);
   } finally {
     desktopCloseHandling = false;
   }
@@ -576,7 +595,7 @@ function installDesktopCloseGuard(): void {
   if (!currentWindow || desktopCloseGuardInstalled) return;
   desktopCloseGuardInstalled = true;
 
-  void currentWindow.onCloseRequested((event) => {
+  void currentWindow.onCloseRequested((event: any) => {
     event.preventDefault();
     void handleDesktopCloseRequest();
   });
