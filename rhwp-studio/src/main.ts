@@ -69,6 +69,7 @@ type RhwpE2EBridge = {
   getOpenDialog: () => RhwpE2EDialogState;
   acceptActiveDialog: () => Promise<boolean>;
   dismissActiveDialog: () => Promise<boolean>;
+  allowNextDesktopCloseWithoutPrompt: () => boolean;
 };
 
 declare global {
@@ -323,6 +324,10 @@ function installE2EBridge(): void {
     getOpenDialog: getDialogState,
     acceptActiveDialog,
     dismissActiveDialog,
+    allowNextDesktopCloseWithoutPrompt: () => {
+      bypassNextDesktopClosePrompt = true;
+      return true;
+    },
   };
 }
 
@@ -516,6 +521,7 @@ async function confirmDiscardIfDirty(title: string, message: string): Promise<bo
 
 let desktopCloseHandling = false;
 let desktopCloseGuardInstalled = false;
+let bypassNextDesktopClosePrompt = false;
 
 function getCurrentTauriWindow():
   | { onCloseRequested: (handler: (event: { preventDefault: () => void }) => void | Promise<void>) => Promise<() => void>; destroy: () => Promise<void> }
@@ -531,6 +537,12 @@ async function handleDesktopCloseRequest(): Promise<void> {
   if (desktopCloseHandling) return;
   desktopCloseHandling = true;
   try {
+    if (bypassNextDesktopClosePrompt) {
+      bypassNextDesktopClosePrompt = false;
+      await closeDesktopWindow();
+      return;
+    }
+
     const session = documentSession.current;
     if (!session.hasDocument || !session.dirty || session.isProtected) {
       await closeDesktopWindow();

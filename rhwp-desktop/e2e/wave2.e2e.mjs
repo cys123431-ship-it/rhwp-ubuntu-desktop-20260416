@@ -163,6 +163,15 @@ async function getState(driver) {
   return driver.executeScript('return window.__RHWP_E2E__.getRuntimeState();');
 }
 
+async function closeDriver(driver) {
+  try {
+    await callHook(driver, 'allowNextDesktopCloseWithoutPrompt');
+  } catch {
+    // Best-effort: the session may already be gone during cleanup.
+  }
+  await driver.quit();
+}
+
 async function waitForState(driver, predicate, timeoutMs, label) {
   let state = null;
   await waitFor(async () => {
@@ -303,7 +312,7 @@ test('shows the default-app banner and handles platform-specific registration fl
       }
     }
   } finally {
-    await driver.quit();
+    await closeDriver(driver);
   }
 }, { concurrency: false, timeout: 60000 });
 
@@ -329,7 +338,7 @@ test('opens the Wave 2 representative HWPX sample as editable-safe', async () =>
     assert.equal(state.session.isProtected, false);
     assert.ok(state.pageCount > 0);
   } finally {
-    await driver.quit();
+    await closeDriver(driver);
   }
 }, { concurrency: false, timeout: 60000 });
 
@@ -374,7 +383,7 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
     const snapshots = await callHook(driver, 'listRecoverySnapshots');
     assert.ok(snapshots.some((item) => item.id === snapshotId));
   } finally {
-    await driver.quit();
+    await closeDriver(driver);
   }
 
   driver = await openApp(isWindows ? [] : [workingCopy]);
@@ -414,7 +423,7 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
     const snapshotsAfterSave = await callHook(driver, 'listRecoverySnapshots');
     assert.ok(!snapshotsAfterSave.some((item) => item.id === snapshotId));
   } finally {
-    await driver.quit();
+    await closeDriver(driver);
   }
 
   driver = await openApp(isWindows ? [] : [workingCopy]);
@@ -432,7 +441,7 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
     );
     assert.equal(finalState.dialog.visible, false);
   } finally {
-    await driver.quit();
+    await closeDriver(driver);
   }
 }, { concurrency: false, timeout: 120000 });
 
@@ -469,7 +478,7 @@ test('opens one window per startup file when multiple documents are provided', a
       new Set([path.basename(hwpSample), path.basename(hwpxSample)]),
     );
   } finally {
-    await driver.quit();
+    await closeDriver(driver);
   }
 }, { concurrency: false, timeout: 90000 });
 
@@ -515,6 +524,6 @@ test('routes a second launch into a new window via single-instance handoff', asy
       new Set([path.basename(firstSample), path.basename(secondSample)]),
     );
   } finally {
-    await driver.quit();
+    await closeDriver(driver);
   }
 }, { concurrency: false, timeout: 90000 });
