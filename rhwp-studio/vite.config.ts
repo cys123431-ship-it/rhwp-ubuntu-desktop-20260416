@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'));
 
-let desktopVersion = '0.1.12'; // fallback
+let desktopVersion = process.env.DESKTOP_RELEASE_VERSION ?? '0.0.0-dev';
 try {
   const desktopPkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'rhwp-desktop', 'package.json'), 'utf-8'));
   desktopVersion = desktopPkg.version;

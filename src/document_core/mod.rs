@@ -191,9 +191,9 @@ pub struct ActiveFieldInfo {
 
 impl DocumentCore {
     fn has_font_substitutions(&self) -> bool {
-        self.font_substitution_entries().into_iter().any(
-            |(_, _, _, substituted, _)| substituted,
-        )
+        self.font_substitution_entries()
+            .into_iter()
+            .any(|(_, _, _, substituted, _)| substituted)
     }
 
     fn compatibility_issue_entries(&self) -> Vec<(&'static str, &'static str, String)> {

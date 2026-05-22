@@ -1,9 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "rhwp",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "identifier": "io.rhwp.desktop",
   "build": {
+    "beforeBuildCommand": "npm run build:studio",
     "frontendDist": "../../rhwp-studio/dist"
   },
   "app": {

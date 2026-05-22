@@ -39,11 +39,15 @@
   overflow-y: auto;
   overflow-x: auto;
   background: var(--color-hover-bg);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #scroll-content {
   position: relative;
   margin: 0 auto;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #scroll-content canvas {
@@ -54,6 +58,15 @@
   image-rendering: crisp-edges;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#scroll-container.rhwp-selecting,
+#scroll-container.rhwp-selecting * {
+  cursor: text;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #scroll-content.grid-mode canvas {

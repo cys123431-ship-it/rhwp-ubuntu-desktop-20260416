@@ -4,6 +4,66 @@
 import type { ContextMenuItem } from '@/ui/context-menu';
 import * as _connector from './input-handler-connector';
 
+function beginTextDragTracking(this: any, e: MouseEvent): void {
+  document.removeEventListener('mousemove', this.onMouseMoveBound);
+  document.removeEventListener('mousemove', this.onMouseMoveBound, true);
+  document.removeEventListener('mouseup', this.onMouseUpBound);
+  document.addEventListener('mouseup', this.onMouseUpBound, { once: true });
+  document.addEventListener('mousemove', this.onMouseMoveBound, true);
+
+  this.container.classList.add('rhwp-selecting');
+  this.lastDragPoint = { clientX: e.clientX, clientY: e.clientY };
+
+  if (this.autoScrollRafId) {
+    cancelAnimationFrame(this.autoScrollRafId);
+    this.autoScrollRafId = 0;
+  }
+
+  const autoScrollLoop = () => {
+    if (!this.isDragging) return;
+
+    const point = this.lastDragPoint;
+    if (point) {
+      const rect = this.container.getBoundingClientRect();
+      const threshold = 56;
+      const maxStep = 32;
+      let delta = 0;
+
+      if (point.clientY < rect.top + threshold) {
+        const ratio = Math.min(1, (rect.top + threshold - point.clientY) / threshold);
+        delta = -Math.max(4, Math.ceil(ratio * maxStep));
+      } else if (point.clientY > rect.bottom - threshold) {
+        const ratio = Math.min(1, (point.clientY - (rect.bottom - threshold)) / threshold);
+        delta = Math.max(4, Math.ceil(ratio * maxStep));
+      }
+
+      if (delta !== 0) {
+        const maxScroll = Math.max(0, this.container.scrollHeight - this.container.clientHeight);
+        const nextScroll = Math.max(0, Math.min(maxScroll, this.container.scrollTop + delta));
+        if (nextScroll !== this.container.scrollTop) {
+          this.container.scrollTop = nextScroll;
+        }
+        this.updateDragSelectionAt(point.clientX, point.clientY);
+      }
+    }
+
+    this.autoScrollRafId = requestAnimationFrame(autoScrollLoop);
+  };
+
+  this.autoScrollRafId = requestAnimationFrame(autoScrollLoop);
+}
+
+function endTextDragTracking(this: any): void {
+  document.removeEventListener('mousemove', this.onMouseMoveBound);
+  document.removeEventListener('mousemove', this.onMouseMoveBound, true);
+  this.container.classList.remove('rhwp-selecting');
+  if (this.autoScrollRafId) {
+    cancelAnimationFrame(this.autoScrollRafId);
+    this.autoScrollRafId = 0;
+  }
+  this.lastDragPoint = null;
+}
+
 export function onClick(this: any, e: MouseEvent): void {
   // 연결선 드로잉 모드: 연결점 클릭으로 시작/끝
   if (this.connectorDrawingMode && e.button === 0) {
@@ -610,7 +670,7 @@ export function onClick(this: any, e: MouseEvent): void {
       this.isDragging = true;
       this.updateCaret();
       this.checkTransparentBordersTransition();
-      document.addEventListener('mouseup', this.onMouseUpBound, { once: true });
+      beginTextDragTracking.call(this, e);
       this.textarea.focus();
       return;
     }
@@ -656,7 +716,7 @@ export function onClick(this: any, e: MouseEvent): void {
               this.active = true;
               this.isDragging = true;
               this.updateCaret();
-              document.addEventListener('mouseup', this.onMouseUpBound, { once: true });
+              beginTextDragTracking.call(this, e);
               this.textarea.focus();
               return;
             }
@@ -726,43 +786,7 @@ export function onClick(this: any, e: MouseEvent): void {
     // 필드(누름틀) 마커 표시 + 상태 표시줄 갱신
     this.updateFieldMarkers();
 
-    // 드래그 종료를 위한 mouseup 리스너 (document에 등록)
-    document.addEventListener('mouseup', this.onMouseUpBound, { once: true });
-    // 컨테이너 바깥 드래그를 감지하기 위해 document에 글로벌 mousemove 이벤트 바인딩
-    document.addEventListener('mousemove', this.onMouseMoveBound);
-
-    // 자동 스크롤 루프 시작
-    if (this.autoScrollRafId) cancelAnimationFrame(this.autoScrollRafId);
-    this.lastDragEvent = e;
-    const autoScrollLoop = () => {
-      if (!this.isDragging) return;
-      if (this.lastDragEvent) {
-        const clientY = this.lastDragEvent.clientY;
-        const rect = this.container.getBoundingClientRect();
-        // 상하단 40px 임계 영역
-        const topThreshold = rect.top + 40;
-        const bottomThreshold = rect.bottom - 40;
-        let scrolled = false;
-
-        if (clientY < topThreshold) {
-          this.container.scrollTop = Math.max(0, this.container.scrollTop - 20);
-          scrolled = true;
-        } else if (clientY > bottomThreshold) {
-          this.container.scrollTop += 20;
-          scrolled = true;
-        }
-
-        if (scrolled) {
-          const hit = this.hitTestFromEvent(this.lastDragEvent);
-          if (hit && hit.paragraphIndex < 0xFFFFFF00) {
-            this.cursor.moveTo(hit);
-            this.updateCaret();
-          }
-        }
-      }
-      this.autoScrollRafId = requestAnimationFrame(autoScrollLoop);
-    };
-    this.autoScrollRafId = requestAnimationFrame(autoScrollLoop);
+    beginTextDragTracking.call(this, e);
 
     // textarea에 포커스하여 키보드 입력 수신
     this.textarea.focus();
@@ -1078,16 +1102,12 @@ export function onMouseMove(this: any, e: MouseEvent): void {
 
   // 드래그 중: requestAnimationFrame으로 throttle하여 성능 확보
   if (this.isDragging) {
-    this.lastDragEvent = e;
+    this.lastDragPoint = { clientX: e.clientX, clientY: e.clientY };
     if (this.dragRafId) return; // 이미 예약된 프레임이 있으면 건너뜀
     this.dragRafId = requestAnimationFrame(() => {
       this.dragRafId = 0;
       if (!this.isDragging) return;
-      const hit = this.hitTestFromEvent(e);
-      if (hit && hit.paragraphIndex < 0xFFFFFF00) {
-        this.cursor.moveTo(hit);
-        this.updateCaret();
-      }
+      this.updateDragSelectionAt(e.clientX, e.clientY);
     });
     return;
   }
@@ -1284,6 +1304,7 @@ export function handleResizeHover(this: any, e: MouseEvent): void {
 export function onMouseUp(this: any, _e: MouseEvent): void {
   // 등록된 글로벌 mousemove 이벤트 제거 (드래그 종료)
   document.removeEventListener('mousemove', this.onMouseMoveBound);
+  document.removeEventListener('mousemove', this.onMouseMoveBound, true);
 
   // 그림 배치 모드 마우스업 → 삽입 실행
   if (this.imagePlacementMode && this.imagePlacementDrag && this.imagePlacementData) {
@@ -1342,11 +1363,7 @@ export function onMouseUp(this: any, _e: MouseEvent): void {
     cancelAnimationFrame(this.dragRafId);
     this.dragRafId = 0;
   }
-  if (this.autoScrollRafId) {
-    cancelAnimationFrame(this.autoScrollRafId);
-    this.autoScrollRafId = 0;
-  }
-  this.lastDragEvent = null;
+  endTextDragTracking.call(this);
 
   // anchor와 focus가 같으면 선택 해제 (단순 클릭)
   const sel = this.cursor.getSelectionOrdered();
@@ -1364,4 +1381,3 @@ export function onMouseUp(this: any, _e: MouseEvent): void {
 
   this.updateCaret();
 }
-

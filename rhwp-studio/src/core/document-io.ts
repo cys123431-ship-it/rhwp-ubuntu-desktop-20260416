@@ -37,6 +37,14 @@ declare global {
           handler: (payload: { payload: unknown }) => void,
         ) => Promise<() => void>;
       };
+      window?: {
+        getCurrentWindow?: () => {
+          onCloseRequested: (
+            handler: (event: { preventDefault: () => void }) => void | Promise<void>,
+          ) => Promise<() => void>;
+          destroy: () => Promise<void>;
+        };
+      };
     };
   }
 }

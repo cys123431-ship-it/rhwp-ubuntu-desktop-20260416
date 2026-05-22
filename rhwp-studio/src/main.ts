@@ -25,7 +25,7 @@ import { CellSelectionRenderer } from '@/engine/cell-selection-renderer';
 import { TableObjectRenderer } from '@/engine/table-object-renderer';
 import { TableResizeRenderer } from '@/engine/table-resize-renderer';
 import { Ruler } from '@/view/ruler';
-import { showConfirm } from '@/ui/confirm-dialog';
+import { showConfirm, showSavePrompt } from '@/ui/confirm-dialog';
 
 const wasm = new WasmBridge();
 const eventBus = new EventBus();
@@ -514,6 +514,62 @@ async function confirmDiscardIfDirty(title: string, message: string): Promise<bo
   return showConfirm(title, message);
 }
 
+let desktopCloseHandling = false;
+let desktopCloseGuardInstalled = false;
+
+function getCurrentTauriWindow():
+  | { onCloseRequested: (handler: (event: { preventDefault: () => void }) => void | Promise<void>) => Promise<() => void>; destroy: () => Promise<void> }
+  | null {
+  return window.__TAURI__?.window?.getCurrentWindow?.() ?? null;
+}
+
+async function closeDesktopWindow(): Promise<void> {
+  await getCurrentTauriWindow()?.destroy();
+}
+
+async function handleDesktopCloseRequest(): Promise<void> {
+  if (desktopCloseHandling) return;
+  desktopCloseHandling = true;
+  try {
+    const session = documentSession.current;
+    if (!session.hasDocument || !session.dirty || session.isProtected) {
+      await closeDesktopWindow();
+      return;
+    }
+
+    const choice = await showSavePrompt(
+      '문서 저장',
+      `${session.fileName || '새 문서'}의 변경 내용을 저장할까요?`,
+    );
+
+    if (choice === 'cancel') {
+      return;
+    }
+    if (choice === 'discard') {
+      await closeDesktopWindow();
+      return;
+    }
+
+    const saved = await saveCurrentDocument();
+    if (saved) {
+      await closeDesktopWindow();
+    }
+  } finally {
+    desktopCloseHandling = false;
+  }
+}
+
+function installDesktopCloseGuard(): void {
+  const currentWindow = getCurrentTauriWindow();
+  if (!currentWindow || desktopCloseGuardInstalled) return;
+  desktopCloseGuardInstalled = true;
+
+  void currentWindow.onCloseRequested((event) => {
+    event.preventDefault();
+    void handleDesktopCloseRequest();
+  });
+}
+
 async function maybeRecoverOpenResult(
   result: OpenDocumentResult,
 ): Promise<{ result: OpenDocumentResult; snapshotId: string | null }> {
@@ -779,6 +835,7 @@ async function initialize(): Promise<void> {
     if (import.meta.env.DEV) {
       (window as any).__inputHandler = inputHandler;
       (window as any).__canvasView = canvasView;
+      (window as any).__installDesktopCloseGuard = installDesktopCloseGuard;
     }
     e2eReady = true;
   } catch (error) {
@@ -1213,6 +1270,7 @@ async function ensureStartupDocument(): Promise<void> {
 }
 
 installE2EBridge();
+installDesktopCloseGuard();
 initialize();
 
 window.addEventListener('beforeunload', (event) => {

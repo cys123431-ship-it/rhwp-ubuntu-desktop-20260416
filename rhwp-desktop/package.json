@@ -1,10 +1,11 @@
 {
   "name": "rhwp-desktop",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
+    "build:studio": "npm --prefix ../rhwp-studio run build",
     "build": "tauri build",
     "build:linux": "tauri build --config src-tauri/tauri.linux.conf.json --target x86_64-unknown-linux-gnu",
     "build:windows": "tauri build --config src-tauri/tauri.windows.conf.json --target x86_64-pc-windows-msvc",

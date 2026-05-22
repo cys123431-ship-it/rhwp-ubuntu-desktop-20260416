@@ -57,7 +57,7 @@ export class InputHandler {
   private isDragging = false;
   private dragRafId = 0; // requestAnimationFrame throttle용
   private autoScrollRafId = 0; // 자동 스크롤 루프용
-  private lastDragEvent: MouseEvent | null = null;
+  private lastDragPoint: { clientX: number; clientY: number } | null = null;
 
   // 표 경계선 hover 상태
   private resizeHoverRafId = 0;
@@ -869,11 +869,39 @@ export class InputHandler {
 
   /** 마우스 이벤트에서 hitTest 결과를 반환한다 */
   private hitTestFromEvent(e: MouseEvent): DocumentPosition | null {
+    return this.hitTestFromClientPoint(e.clientX, e.clientY);
+  }
+
+  /** 드래그 선택용 hitTest: 컨테이너 밖 좌표를 가장 가까운 뷰포트 안쪽으로 보정한다 */
+  private hitTestFromDragPoint(clientX: number, clientY: number): DocumentPosition | null {
+    return this.hitTestFromClientPoint(clientX, clientY, true);
+  }
+
+  private updateDragSelectionAt(clientX: number, clientY: number): void {
+    const hit = this.hitTestFromDragPoint(clientX, clientY);
+    if (hit && hit.paragraphIndex < 0xFFFFFF00) {
+      this.cursor.moveTo(hit);
+      this.updateCaret();
+    }
+  }
+
+  private hitTestFromClientPoint(
+    clientX: number,
+    clientY: number,
+    clampToViewport = false,
+  ): DocumentPosition | null {
     const zoom = this.viewportManager.getZoom();
     const scrollContent = this.container.querySelector('#scroll-content');
     if (!scrollContent) return null;
-    const contentX = this.viewportManager.getContentX(e.clientX);
-    const contentY = this.viewportManager.getContentY(e.clientY);
+    const rect = this.container.getBoundingClientRect();
+    let x = clientX;
+    let y = clientY;
+    if (clampToViewport) {
+      x = Math.min(rect.right - 1, Math.max(rect.left + 1, x));
+      y = Math.min(rect.bottom - 1, Math.max(rect.top + 1, y));
+    }
+    const contentX = (x - rect.left) + this.container.scrollLeft;
+    const contentY = (y - rect.top) + this.container.scrollTop;
     const pageIdx = this.virtualScroll.getPageAtY(contentY);
     const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
     const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
@@ -1849,6 +1877,8 @@ export class InputHandler {
     this.container.removeEventListener('dblclick', this.onDblClickBound);
     this.container.removeEventListener('contextmenu', this.onContextMenuBound);
     this.container.removeEventListener('mousemove', this.onMouseMoveBound);
+    document.removeEventListener('mousemove', this.onMouseMoveBound);
+    document.removeEventListener('mousemove', this.onMouseMoveBound, true);
     document.removeEventListener('mouseup', this.onMouseUpBound);
     this.textarea.removeEventListener('keydown', this.onKeyDownBound);
     this.textarea.removeEventListener('input', this.onInputBound);

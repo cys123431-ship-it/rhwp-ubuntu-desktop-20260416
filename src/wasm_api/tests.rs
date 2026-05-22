@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::model::document::{Document, Section};
 use crate::model::paragraph::{LineSeg, Paragraph};
