@@ -69,7 +69,20 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Detect npm token
+        id: npm-token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "NPM_TOKEN is not configured. Skipping @rhwp/core publish."
+          fi
+
       - name: Publish to npm
+        if: steps.npm-token.outputs.available == 'true'
         working-directory: pkg
         run: npm publish --access public --provenance
         env:
@@ -92,7 +105,20 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Detect npm token
+        id: npm-token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "NPM_TOKEN is not configured. Skipping @rhwp/editor publish."
+          fi
+
       - name: Publish to npm
+        if: steps.npm-token.outputs.available == 'true'
         working-directory: npm/editor
         run: npm publish --access public --provenance
         env:
@@ -135,10 +161,40 @@ jobs:
         working-directory: rhwp-vscode
         run: npm run compile
 
+      - name: Detect VS Code Marketplace token
+        id: vsce-token
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -n "$VSCE_PAT" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "VSCE_PAT is not configured. Skipping VS Code Marketplace publish."
+          fi
+
       - name: Publish to VS Code Marketplace
+        if: steps.vsce-token.outputs.available == 'true'
         working-directory: rhwp-vscode
-        run: npx vsce publish -p ${{ secrets.VSCE_PAT }}
+        run: npx @vscode/vsce publish -p "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Detect Open VSX token
+        id: ovsx-token
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "$OVSX_PAT" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "OVSX_PAT is not configured. Skipping Open VSX publish."
+          fi
 
       - name: Publish to Open VSX
+        if: steps.ovsx-token.outputs.available == 'true'
         working-directory: rhwp-vscode
-        run: npx ovsx publish -p ${{ secrets.OVSX_PAT }}
+        run: npx ovsx publish -p "$OVSX_PAT"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
