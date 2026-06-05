@@ -469,7 +469,7 @@ fn next_document_window_label(
 
 fn build_document_window(app: &AppHandle, label: &str) -> Result<(), String> {
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
-        .title("rhwp")
+        .title("Geulbit X")
         .inner_size(1440.0, 980.0)
         .min_inner_size(960.0, 720.0)
         .resizable(true)
@@ -562,9 +562,9 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
             supported: true,
             is_default,
             message: if is_default {
-                "rhwp가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
+                "Geulbit X가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
             } else {
-                "HWP/HWPX 파일을 더블클릭하면 rhwp로 열리도록 기본 앱으로 설정하세요.".to_string()
+                "HWP/HWPX 파일을 더블클릭하면 Geulbit X로 열리도록 기본 앱으로 설정하세요.".to_string()
             },
             platform: "linux".to_string(),
             action_mode: "set-default".to_string(),
@@ -585,9 +585,9 @@ fn load_file_association_status() -> Result<FileAssociationStatus, String> {
             supported: true,
             is_default,
             message: if is_default {
-                "rhwp가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
+                "Geulbit X가 이미 HWP/HWPX 파일의 기본 앱으로 설정되어 있습니다.".to_string()
             } else {
-                "Windows에서는 기본 앱을 사용자가 확인해야 합니다. 기본 앱 설정을 열어 .hwp와 .hwpx에 rhwp를 선택하세요.".to_string()
+                "Windows에서는 기본 앱을 사용자가 확인해야 합니다. 기본 앱 설정을 열어 .hwp와 .hwpx에 Geulbit X를 선택하세요.".to_string()
             },
             platform: "windows".to_string(),
             action_mode: "open-settings".to_string(),
@@ -905,7 +905,7 @@ fn set_default_file_association() -> Result<FileAssociationStatus, String> {
         let mut association_status = load_file_association_status()?;
         if !association_status.is_default {
             association_status.message =
-                "Windows Default Apps Settings opened. Choose rhwp for .hwp and .hwpx.".to_string();
+                "Windows Default Apps Settings opened. Choose Geulbit X for .hwp and .hwpx.".to_string();
         }
         return Ok(association_status);
     }

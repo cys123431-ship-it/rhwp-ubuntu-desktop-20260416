@@ -1,13 +1,13 @@
-# rhwp-desktop
+# Geulbit X Desktop
 
-Desktop wrapper for `rhwp-studio` on Ubuntu and Windows.
+Desktop wrapper for `Geulbit X` on Ubuntu and Windows.
 
 ## Desktop scope
 
-- Package `rhwp-studio` as a Tauri desktop app for Ubuntu `22.04/24.04 LTS x86_64` and Windows `10/11 x64`.
+- Package the Geulbit X editor as a Tauri desktop app for Ubuntu `22.04/24.04 LTS x86_64` and Windows `10/11 x64`.
 - Open `.hwp` and `.hwpx` through native file dialogs, startup file arguments, and desktop file associations.
 - Keep the original extension on `Save`; allow format conversion on `Save As`.
-- Show a first-run banner when `rhwp` is not yet the default app for HWP/HWPX documents.
+- Show a first-run banner when Geulbit X is not yet the default app for HWP/HWPX documents.
 - Persist recent documents and automatic recovery snapshots in the app data directory.
 - Block risky documents with `protected-view` instead of attempting lossy saves.
 
@@ -16,7 +16,7 @@ Desktop wrapper for `rhwp-studio` on Ubuntu and Windows.
 ### Ubuntu
 
 1. Install the generated `.deb`.
-2. Launch `rhwp`.
+2. Launch Geulbit X.
 3. If the session banner offers `Set as default app`, click it once.
 4. After that, `.hwp` and `.hwpx` files can be opened by double-click in Nautilus.
 
@@ -25,12 +25,12 @@ The app uses `xdg-mime default rhwp.desktop application/x-hwp application/x-hwpx
 ### Windows
 
 1. Install the generated NSIS `.exe` or MSI package.
-2. Launch `rhwp`.
+2. Launch Geulbit X.
 3. If the session banner offers `Open Default Apps Settings`, open it once.
-4. In Windows Settings, choose `rhwp` as the default app for `.hwp` and `.hwpx`.
+4. In Windows Settings, choose Geulbit X as the default app for `.hwp` and `.hwpx`.
 5. After that, `.hwp` and `.hwpx` files can be opened by double-click in Explorer.
 
-Windows default-app selection requires explicit user confirmation, so `rhwp` opens Settings instead of changing defaults silently.
+Windows default-app selection requires explicit user confirmation, so Geulbit X opens Settings instead of changing defaults silently.
 
 ## Recovery and save policy
 

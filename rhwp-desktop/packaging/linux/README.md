@@ -1,4 +1,4 @@
-Phase-1 Ubuntu packaging assets for `rhwp`.
+Phase-1 Ubuntu packaging assets for Geulbit X.
 
 Included files:
 

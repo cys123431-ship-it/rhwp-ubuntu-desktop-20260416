@@ -178,10 +178,20 @@ jobs:
 
       - name: Verify installed executable and file handlers
         run: |
-          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
-          if (-not (Test-Path $appPath)) {
-            throw "Installed executable not found: $appPath"
+          $appPathCandidates = @(
+            (Join-Path $env:ProgramFiles 'Geulbit X\rhwp.exe'),
+            (Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'),
+            (Join-Path $env:ProgramFiles 'Geulbit X\Geulbit X.exe')
+          )
+          $appPath = $appPathCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $appPath) {
+            $appPath = Get-ChildItem $env:ProgramFiles -Recurse -Filter rhwp.exe -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
           }
+          if ([string]::IsNullOrWhiteSpace($appPath) -or -not (Test-Path $appPath)) {
+            throw "Installed executable not found."
+          }
+          "RHWP_E2E_APP=$appPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           $candidateKeys = @(
             'Registry::HKEY_CLASSES_ROOT\Applications\rhwp.exe\SupportedTypes',
@@ -238,7 +248,10 @@ jobs:
 
       - name: Verify startup open by command line
         run: |
-          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
+          $appPath = $env:RHWP_E2E_APP
+          if ([string]::IsNullOrWhiteSpace($appPath) -or -not (Test-Path $appPath)) {
+            throw "Installed executable not found: $appPath"
+          }
           $sample = Join-Path $PWD 'samples\task-001.hwp'
           $process = Start-Process -FilePath $appPath -ArgumentList ('"' + $sample + '"') -PassThru
           Start-Sleep -Seconds 10
@@ -254,7 +267,6 @@ jobs:
       - name: Run installed-package desktop E2E
         working-directory: rhwp-desktop
         env:
-          RHWP_E2E_APP: C:\Program Files\rhwp\rhwp.exe
           RHWP_E2E_SKIP_STARTUP_SAMPLE: '1'
         run: npm run e2e:installed
 
@@ -300,10 +312,20 @@ jobs:
 
       - name: Verify installed executable and file handlers
         run: |
-          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
-          if (-not (Test-Path $appPath)) {
-            throw "Installed executable not found: $appPath"
+          $appPathCandidates = @(
+            (Join-Path $env:ProgramFiles 'Geulbit X\rhwp.exe'),
+            (Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'),
+            (Join-Path $env:ProgramFiles 'Geulbit X\Geulbit X.exe')
+          )
+          $appPath = $appPathCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $appPath) {
+            $appPath = Get-ChildItem $env:ProgramFiles -Recurse -Filter rhwp.exe -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
           }
+          if ([string]::IsNullOrWhiteSpace($appPath) -or -not (Test-Path $appPath)) {
+            throw "Installed executable not found."
+          }
+          "RHWP_E2E_APP=$appPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           $candidateKeys = @(
             'Registry::HKEY_CLASSES_ROOT\Applications\rhwp.exe\SupportedTypes',
@@ -360,7 +382,10 @@ jobs:
 
       - name: Verify startup open by command line
         run: |
-          $appPath = Join-Path $env:ProgramFiles 'rhwp\rhwp.exe'
+          $appPath = $env:RHWP_E2E_APP
+          if ([string]::IsNullOrWhiteSpace($appPath) -or -not (Test-Path $appPath)) {
+            throw "Installed executable not found: $appPath"
+          }
           $sample = Join-Path $PWD 'samples\tac-img-02.hwpx'
           $process = Start-Process -FilePath $appPath -ArgumentList ('"' + $sample + '"') -PassThru
           Start-Sleep -Seconds 10
@@ -376,7 +401,6 @@ jobs:
       - name: Run installed-package desktop E2E
         working-directory: rhwp-desktop
         env:
-          RHWP_E2E_APP: C:\Program Files\rhwp\rhwp.exe
           RHWP_E2E_SKIP_STARTUP_SAMPLE: '1'
         run: npm run e2e:installed
 

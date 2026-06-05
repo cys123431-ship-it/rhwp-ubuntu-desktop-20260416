@@ -52,13 +52,13 @@ export class AboutDialog extends ModalDialog {
     // 제품 영문명
     const titleEn = document.createElement('div');
     titleEn.className = 'about-product-name';
-    titleEn.textContent = 'HWP 5.0 Compatible Module for Rust';
+    titleEn.textContent = 'Geulbit X';
     body.appendChild(titleEn);
 
     // 제품 한국어명
     const titleKo = document.createElement('div');
     titleKo.className = 'about-product-name-ko';
-    titleKo.textContent = '한글 문서 호환 저장 도구';
+    titleKo.textContent = 'HWP/HWPX 문서 편집기';
     body.appendChild(titleKo);
 
     // 버전
@@ -122,7 +122,7 @@ export class AboutDialog extends ModalDialog {
     // 저작권
     const copyright = document.createElement('div');
     copyright.className = 'about-copyright';
-    copyright.textContent = '\u00A9 2026';
+    copyright.textContent = '\u00A9 2026 Geulbit X contributors';
     body.appendChild(copyright);
 
     return body;

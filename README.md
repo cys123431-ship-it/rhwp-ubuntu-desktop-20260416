@@ -1,6 +1,6 @@
-# rhwp Desktop
+# Geulbit X
 
-`rhwp Desktop`는 [edwardkim/rhwp](https://github.com/edwardkim/rhwp)를 기반으로 만든 고성능 HWP/HWPX 데스크톱 뷰어 및 에디터입니다.
+`Geulbit X`는 [edwardkim/rhwp](https://github.com/edwardkim/rhwp)를 기반으로 만든 고성능 HWP/HWPX 데스크톱 뷰어 및 에디터입니다.
 
 이 프로젝트는 웹 기반의 `rhwp` 엔진을 활용해, 우분투와 윈도우 환경에서 파일 더블 클릭만으로 문서를 바로 열고 읽고 편집할 수 있는 네이티브 경험을 제공하는 것을 목표로 제작되었습니다. 비영리 오픈소스 프로젝트이며, 현재 이 저장소는 Ubuntu용 `.deb`와 Windows용 설치 패키지(NSIS `.exe`, MSI)를 함께 관리합니다.
 
@@ -33,21 +33,21 @@
 
 ### Ubuntu
 
-1. GitHub Releases에서 최신 `rhwp_*_amd64.deb` 파일을 받습니다.
+1. GitHub Releases에서 최신 Ubuntu `.deb` 파일을 받습니다.
 2. 우분투 터미널에서 아래 명령으로 설치합니다.
 
 ```bash
 cd ~/Downloads
-sudo apt install ./rhwp_*_amd64.deb
+sudo apt install ./*.deb
 ```
 
-설치 후에는 앱 목록에서 `rhwp`를 실행할 수 있고, 시스템 파일 연결이 적용되면 `.hwp`, `.hwpx` 파일을 더블 클릭해서 열 수 있습니다.
+설치 후에는 앱 목록에서 `Geulbit X`를 실행할 수 있고, 시스템 파일 연결이 적용되면 `.hwp`, `.hwpx` 파일을 더블 클릭해서 열 수 있습니다.
 
 ### Windows
 
 1. GitHub Releases에 Windows 설치 파일(`.exe` 또는 `.msi`)이 게시된 경우 이를 받거나, 저장소의 Windows 패키징 워크플로로 생성한 설치 파일을 준비합니다.
-2. 설치 프로그램을 실행해 `rhwp`를 설치합니다.
-3. 설치 후 Windows `Default Apps`에서 `.hwp`, `.hwpx` 기본 앱으로 `rhwp`를 한 번 선택합니다.
+2. 설치 프로그램을 실행해 `Geulbit X`를 설치합니다.
+3. 설치 후 Windows `Default Apps`에서 `.hwp`, `.hwpx` 기본 앱으로 `Geulbit X`를 한 번 선택합니다.
 
 Windows는 운영체제 정책상 앱이 기본 앱을 강제로 바꾸지 않으므로, Explorer 더블 클릭 열기를 완성하려면 위 기본 앱 선택 단계가 한 번 필요합니다.
 

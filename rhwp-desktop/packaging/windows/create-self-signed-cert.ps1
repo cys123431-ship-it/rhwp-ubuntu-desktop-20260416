@@ -1,7 +1,7 @@
 param(
   [string]$OutputDirectory = (Join-Path $env:LOCALAPPDATA 'rhwp-signing'),
-  [string]$Subject = 'CN=rhwp contributors (Self-Signed)',
-  [string]$FriendlyName = 'rhwp self-signed code signing',
+  [string]$Subject = 'CN=Geulbit X contributors (Self-Signed)',
+  [string]$FriendlyName = 'Geulbit X self-signed code signing',
   [string]$PfxPassword
 )
 

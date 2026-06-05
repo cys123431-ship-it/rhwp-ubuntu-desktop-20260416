@@ -259,13 +259,16 @@ jobs:
         run: |
           DEB_PATH="$(find "$PWD/dist" -type f -name '*.deb' | head -n 1)"
           test -n "$DEB_PATH"
+          DEB_PACKAGE_NAME="$(dpkg-deb -f "$DEB_PATH" Package)"
+          test -n "$DEB_PACKAGE_NAME"
+          echo "DEB_PACKAGE_NAME=$DEB_PACKAGE_NAME" >> "$GITHUB_ENV"
           sudo dpkg -i "$DEB_PATH" || sudo apt-get install -y -f
 
       - name: Verify desktop integration assets
         run: |
-          dpkg -L rhwp | grep '/usr/share/applications/rhwp.desktop'
-          dpkg -L rhwp | grep '/usr/share/mime/packages/rhwp-mime.xml'
-          dpkg -L rhwp | grep '/usr/bin/rhwp$'
+          dpkg -L "$DEB_PACKAGE_NAME" | grep '/usr/share/applications/rhwp.desktop'
+          dpkg -L "$DEB_PACKAGE_NAME" | grep '/usr/share/mime/packages/rhwp-mime.xml'
+          dpkg -L "$DEB_PACKAGE_NAME" | grep '/usr/bin/rhwp$'
           desktop-file-validate /usr/share/applications/rhwp.desktop
           update-mime-database /usr/share/mime
 
@@ -297,7 +300,7 @@ jobs:
           {
             echo "## Ubuntu Desktop E2E"
             echo
-            echo "- Installed package: \`rhwp\`"
+            echo "- Installed package: \`$DEB_PACKAGE_NAME\`"
             echo "- Display matrix target: \`${{ matrix.ubuntu-version }}\`"
             echo "- Verified: first-run default-app banner, HWPX startup open, multi-window startup fan-out"
             echo "- Skipped: recovery restore/delete in installed-package smoke; covered by local desktop E2E"
