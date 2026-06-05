@@ -185,6 +185,7 @@ async function closeDriver(driver) {
   } catch {
     // Best-effort: stale WebDriver sessions should not mask the test result.
   }
+  await terminateInstalledProcesses();
 }
 
 async function waitForState(driver, predicate, timeoutMs, label) {
