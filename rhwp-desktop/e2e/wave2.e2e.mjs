@@ -333,13 +333,9 @@ test('shows the default-app banner and handles platform-specific registration fl
 
 test('opens the Wave 2 representative HWPX sample as editable-safe', async () => {
   const samplePath = path.resolve(repoRoot, 'samples', 'tac-img-02.hwpx');
-  const driver = await openApp(isWindows ? [] : [samplePath]);
+  const driver = await openApp([samplePath]);
 
   try {
-    if (isWindows) {
-      assert.equal(await callHook(driver, 'openDocumentAtPath', samplePath), true);
-    }
-
     const state = await waitForState(
       driver,
       (candidate) => candidate.session.hasDocument,
