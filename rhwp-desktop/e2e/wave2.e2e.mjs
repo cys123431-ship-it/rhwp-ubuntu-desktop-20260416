@@ -18,6 +18,7 @@ const tauriDriverHost = process.env.RHWP_E2E_DRIVER_HOST ?? '127.0.0.1';
 const tauriDriverPort = Number(process.env.RHWP_E2E_DRIVER_PORT ?? '4444');
 const tauriDriverBin = process.env.RHWP_E2E_TAURI_DRIVER ?? 'tauri-driver';
 const bridgeTimeoutMs = Number(process.env.RHWP_E2E_BRIDGE_TIMEOUT_MS ?? '60000');
+const skipRecoveryE2E = process.env.RHWP_E2E_SKIP_RECOVERY === '1';
 const defaultAppPattern = /default app|기본 앱/i;
 const settingsPattern = /settings|설정/i;
 
@@ -355,6 +356,11 @@ test('opens the Wave 2 representative HWPX sample as editable-safe', async () =>
 }, { concurrency: false, timeout: 60000 });
 
 test('restores and clears recovery snapshots for dirty editable documents', async (t) => {
+  if (skipRecoveryE2E) {
+    t.skip('Recovery flow is covered outside installed-package smoke tests.');
+    return;
+  }
+
   if (isWindows) {
     t.skip('Windows recovery flow is covered by startup-open smoke tests and local validation.');
     return;

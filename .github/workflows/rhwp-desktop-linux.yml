@@ -277,6 +277,7 @@ jobs:
         working-directory: rhwp-desktop
         env:
           RHWP_E2E_APP: /usr/bin/rhwp
+          RHWP_E2E_SKIP_RECOVERY: '1'
         run: |
           xvfb-run -a npm run e2e:installed
 
@@ -298,7 +299,8 @@ jobs:
             echo
             echo "- Installed package: \`rhwp\`"
             echo "- Display matrix target: \`${{ matrix.ubuntu-version }}\`"
-            echo "- Verified: first-run default-app banner, HWPX startup open, recovery restore/delete, multi-window startup fan-out"
+            echo "- Verified: first-run default-app banner, HWPX startup open, multi-window startup fan-out"
+            echo "- Skipped: recovery restore/delete in installed-package smoke; covered by local desktop E2E"
             echo "- Verified HWPX default-app registration with primary MIME \`application/vnd.hancom.hwpx\` and legacy alias fallback"
           } >> "$GITHUB_STEP_SUMMARY"
 
