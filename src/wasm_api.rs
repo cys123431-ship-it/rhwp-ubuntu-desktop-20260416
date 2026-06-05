@@ -3440,6 +3440,16 @@ impl HwpDocument {
         self.export_hwpx_native().map_err(|e| e.into())
     }
 
+    /// 문서를 변환용 HWPX 바이너리로 내보낸다.
+    ///
+    /// 일반 `exportHwpx`/`save("hwpx")`는 원본 HWPX 보존을 우선하여
+    /// 일부 미지원 레코드를 오류로 처리한다. 이 함수는 다른 형식으로
+    /// 저장할 때 파일 생성을 우선하며, 표현할 수 없는 항목은 생략한다.
+    #[wasm_bindgen(js_name = exportHwpxLossy)]
+    pub fn export_hwpx_lossy(&self) -> Result<Vec<u8>, JsValue> {
+        self.export_hwpx_lossy_native().map_err(|e| e.into())
+    }
+
     /// 문서를 DOCX 파일로 내보낸다.
     #[wasm_bindgen(js_name = exportDocx)]
     pub fn export_docx(&self) -> Result<Vec<u8>, JsValue> {

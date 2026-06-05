@@ -45,6 +45,7 @@ pub struct HwpxPreservationContext<'a> {
     pub snapshot: Option<&'a HwpxPackageSnapshot>,
     pub dirty_sections: Option<&'a [bool]>,
     pub doc_info_dirty: bool,
+    pub allow_lossy_export: bool,
 }
 
 #[cfg(test)]
@@ -258,6 +259,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[false]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         );
         assert!(clean_report.is_supported());
@@ -273,6 +275,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[true]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         );
         assert!(!dirty_report.is_supported());
@@ -308,6 +311,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[false]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         );
         assert!(clean_report.is_supported(), "{:?}", clean_report.blockers);
@@ -328,6 +332,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[true]),
                 doc_info_dirty: true,
+                allow_lossy_export: false,
             },
         );
         assert!(!dirty_report.is_supported());
@@ -491,6 +496,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[false]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         );
         assert!(clean_report.is_supported());
@@ -504,6 +510,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[true]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         );
         assert!(!dirty_report.is_supported());
@@ -562,6 +569,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[false]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         )
         .expect("save with snapshot");
@@ -570,6 +578,30 @@ mod tests_clean {
             .entry("META-INF/custom.xml")
             .expect("preserved extra entry");
         assert_eq!(extra.bytes, b"<custom preserved=\"yes\"/>");
+    }
+
+    #[test]
+    fn test_lossy_hwpx_export_converts_hwp_with_preservation_blockers() {
+        let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("samples/re-01-hangul-only.hwp");
+        let bytes = std::fs::read(sample).expect("read sample hwp");
+        let core =
+            crate::document_core::DocumentCore::from_bytes(&bytes).expect("parse sample hwp");
+
+        assert!(
+            core.export_hwpx_native().is_err(),
+            "sample should still exercise strict preservation blockers",
+        );
+
+        let exported = core
+            .export_hwpx_lossy_native()
+            .expect("lossy hwpx export succeeds");
+        let reparsed = crate::document_core::DocumentCore::from_bytes(&exported)
+            .expect("reparse lossy hwpx export");
+        assert_eq!(
+            reparsed.source_format(),
+            crate::document_core::DocumentSourceFormat::Hwpx
+        );
     }
 
     #[test]
@@ -988,6 +1020,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[false]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         );
         assert!(clean_report.is_supported(), "{:?}", clean_report.blockers);
@@ -1010,6 +1043,7 @@ mod tests_clean {
                 snapshot: Some(&snapshot),
                 dirty_sections: Some(&[true]),
                 doc_info_dirty: false,
+                allow_lossy_export: false,
             },
         );
         assert!(!dirty_report.is_supported());
@@ -1283,11 +1317,13 @@ pub fn analyze_hwpx_support_with_context(
     context: HwpxPreservationContext<'_>,
 ) -> HwpxSupportReport {
     let mut report = analyze_hwpx_support(doc);
-    if context.snapshot.is_none() {
+    if context.snapshot.is_none() && !context.allow_lossy_export {
         return report;
     }
 
-    append_snapshot_shape_issues(&mut report, context);
+    if context.snapshot.is_some() {
+        append_snapshot_shape_issues(&mut report, context);
+    }
 
     for issue in &mut report.issues {
         issue.severity = classify_issue_severity(issue, context);
@@ -1300,6 +1336,14 @@ fn classify_issue_severity(
     issue: &HwpxSupportIssue,
     context: HwpxPreservationContext<'_>,
 ) -> HwpxIssueSeverity {
+    if context.allow_lossy_export {
+        return match issue.code {
+            "hwpx-encrypted-document" | "hwpx-distribution-document" => HwpxIssueSeverity::Blocker,
+            "hwpx-preview-regenerated" => HwpxIssueSeverity::Info,
+            _ => HwpxIssueSeverity::Warning,
+        };
+    }
+
     match issue.code {
         "hwpx-encrypted-document" | "hwpx-distribution-document" | "hwpx-extra-binary-streams" => {
             HwpxIssueSeverity::Blocker
@@ -1757,7 +1801,7 @@ pub fn serialize_hwpx_with_context(
     for (index, path) in section_paths.iter().enumerate() {
         if section_needs_rewrite(index, path, context) {
             let section = doc.sections.get(index).cloned().unwrap_or_default();
-            let xml = serialize_section_xml(&section)?;
+            let xml = serialize_section_xml(&section, context.allow_lossy_export)?;
             replacements.insert(path.clone(), xml.into_bytes());
         }
     }
@@ -2430,7 +2474,10 @@ fn serialize_para_shape(para_shape: &ParaShape) -> String {
     xml
 }
 
-fn serialize_section_xml(section: &Section) -> Result<String, SerializeError> {
+fn serialize_section_xml(
+    section: &Section,
+    allow_lossy_export: bool,
+) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(
@@ -2443,6 +2490,7 @@ fn serialize_section_xml(section: &Section) -> Result<String, SerializeError> {
             &blank,
             Some(&section.section_def),
             None,
+            allow_lossy_export,
         )?);
     } else {
         let embedded_col_def = section.paragraphs[0]
@@ -2454,6 +2502,7 @@ fn serialize_section_xml(section: &Section) -> Result<String, SerializeError> {
                 para,
                 (index == 0).then_some(&section.section_def),
                 if index == 0 { embedded_col_def } else { None },
+                allow_lossy_export,
             )?);
         }
     }
@@ -2466,6 +2515,7 @@ fn serialize_paragraph_xml(
     para: &Paragraph,
     section_def: Option<&SectionDef>,
     embedded_column_def_idx: Option<usize>,
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
@@ -2599,7 +2649,10 @@ fn serialize_paragraph_xml(
                 if Some(*ctrl_idx) == embedded_column_def_idx {
                     continue;
                 }
-                xml.push_str(&serialize_control_xml(&para.controls[*ctrl_idx])?);
+                xml.push_str(&serialize_control_xml(
+                    &para.controls[*ctrl_idx],
+                    allow_lossy_export,
+                )?);
             }
         }
 
@@ -2805,7 +2858,10 @@ fn serialize_linesegs(para: &Paragraph) -> String {
     xml
 }
 
-fn serialize_control_xml(control: &Control) -> Result<String, SerializeError> {
+fn serialize_control_xml(
+    control: &Control,
+    allow_lossy_export: bool,
+) -> Result<String, SerializeError> {
     match control {
         Control::ColumnDef(column_def) => Ok(format!(
             r#"<hp:ctrl><hp:colPr type="{}" layout="{}" colCount="{}" sameSz="{}" sameGap="{}"/></hp:ctrl>"#,
@@ -2815,24 +2871,39 @@ fn serialize_control_xml(control: &Control) -> Result<String, SerializeError> {
             bool_to_attr(column_def.same_width),
             column_def.spacing,
         )),
-        Control::Table(table) => serialize_table_xml(table),
-        Control::Picture(picture) => serialize_picture_xml(picture),
-        Control::Shape(shape) => serialize_shape_xml(shape, false),
+        Control::Table(table) => serialize_table_xml(table, allow_lossy_export),
+        Control::Picture(picture) => serialize_picture_xml(picture, allow_lossy_export),
+        Control::Shape(shape) => serialize_shape_xml(shape, false, allow_lossy_export),
         Control::Header(header) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
-            serialize_header_footer_control("header", header.apply_to, &header.paragraphs,)?
+            serialize_header_footer_control(
+                "header",
+                header.apply_to,
+                &header.paragraphs,
+                allow_lossy_export,
+            )?
         )),
         Control::Footer(footer) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
-            serialize_header_footer_control("footer", footer.apply_to, &footer.paragraphs,)?
+            serialize_header_footer_control(
+                "footer",
+                footer.apply_to,
+                &footer.paragraphs,
+                allow_lossy_export,
+            )?
         )),
         Control::Footnote(note) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
-            serialize_note_control("footNote", note.number, &note.paragraphs)?
+            serialize_note_control(
+                "footNote",
+                note.number,
+                &note.paragraphs,
+                allow_lossy_export
+            )?
         )),
         Control::Endnote(note) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
-            serialize_note_control("endNote", note.number, &note.paragraphs)?
+            serialize_note_control("endNote", note.number, &note.paragraphs, allow_lossy_export)?
         )),
         Control::AutoNumber(auto_number) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
@@ -2856,11 +2927,12 @@ fn serialize_control_xml(control: &Control) -> Result<String, SerializeError> {
         )),
         Control::HiddenComment(comment) => Ok(format!(
             r#"<hp:ctrl>{}</hp:ctrl>"#,
-            serialize_hidden_comment_control(comment)?
+            serialize_hidden_comment_control(comment, allow_lossy_export)?
         )),
         Control::Equation(eq) => Ok(serialize_equation_xml(eq)),
         Control::Form(form) => Ok(serialize_form_control(form)),
         Control::Ruby(ruby) => Ok(serialize_ruby_xml(ruby)),
+        other if allow_lossy_export => Ok(String::new()),
         other => Err(SerializeError::CfbError(format!(
             "Unsupported control reached HWPX serializer: {:?}",
             other
@@ -3039,7 +3111,7 @@ fn resolved_field_ids(field: &Field, control_idx: usize) -> (u32, u32) {
     (ctrl_id, field_id)
 }
 
-fn serialize_table_xml(table: &Table) -> Result<String, SerializeError> {
+fn serialize_table_xml(table: &Table, allow_lossy_export: bool) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
         r#"<hp:tbl rowCnt="{}" colCnt="{}" cellSpacing="{}" borderFillIDRef="{}" pageBreak="{}" repeatHeader="{}" textWrap="{}">"#,
@@ -3078,7 +3150,7 @@ fn serialize_table_xml(table: &Table) -> Result<String, SerializeError> {
         ));
     }
     if let Some(caption) = &table.caption {
-        xml.push_str(&serialize_caption_xml(caption)?);
+        xml.push_str(&serialize_caption_xml(caption, allow_lossy_export)?);
     }
 
     for row in 0..table.row_count {
@@ -3086,7 +3158,7 @@ fn serialize_table_xml(table: &Table) -> Result<String, SerializeError> {
         let mut row_cells: Vec<&Cell> = table.cells.iter().filter(|cell| cell.row == row).collect();
         row_cells.sort_by_key(|cell| cell.col);
         for cell in row_cells {
-            xml.push_str(&serialize_table_cell_xml(cell)?);
+            xml.push_str(&serialize_table_cell_xml(cell, allow_lossy_export)?);
         }
         xml.push_str(r#"</hp:tr>"#);
     }
@@ -3094,7 +3166,10 @@ fn serialize_table_xml(table: &Table) -> Result<String, SerializeError> {
     Ok(xml)
 }
 
-fn serialize_table_cell_xml(cell: &Cell) -> Result<String, SerializeError> {
+fn serialize_table_cell_xml(
+    cell: &Cell,
+    allow_lossy_export: bool,
+) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
         r#"<hp:tc borderFillIDRef="{}" header="{}">"#,
@@ -3127,23 +3202,33 @@ fn serialize_table_cell_xml(cell: &Cell) -> Result<String, SerializeError> {
             &Paragraph::new_empty(),
             None,
             None,
+            allow_lossy_export,
         )?);
     } else {
         for para in &cell.paragraphs {
-            xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+            xml.push_str(&serialize_paragraph_xml(
+                para,
+                None,
+                None,
+                allow_lossy_export,
+            )?);
         }
     }
     xml.push_str(r#"</hp:subList></hp:tc>"#);
     Ok(xml)
 }
 
-fn serialize_picture_xml(picture: &Picture) -> Result<String, SerializeError> {
-    serialize_picture_xml_with_context(picture, false)
+fn serialize_picture_xml(
+    picture: &Picture,
+    allow_lossy_export: bool,
+) -> Result<String, SerializeError> {
+    serialize_picture_xml_with_context(picture, false, allow_lossy_export)
 }
 
 fn serialize_picture_xml_with_context(
     picture: &Picture,
     nested_in_group: bool,
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
@@ -3159,7 +3244,7 @@ fn serialize_picture_xml_with_context(
     }
     xml.push_str(&serialize_out_margin_xml(&picture.common));
     if let Some(caption) = &picture.caption {
-        xml.push_str(&serialize_caption_xml(caption)?);
+        xml.push_str(&serialize_caption_xml(caption, allow_lossy_export)?);
     }
     xml.push_str(&serialize_shape_component_xml(&picture.shape_attr, true));
     xml.push_str(&serialize_line_shape_xml(
@@ -3190,10 +3275,11 @@ fn serialize_picture_xml_with_context(
 fn serialize_shape_xml(
     shape: &ShapeObject,
     nested_in_group: bool,
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     match shape {
         ShapeObject::Picture(picture) => {
-            serialize_picture_xml_with_context(picture, nested_in_group)
+            serialize_picture_xml_with_context(picture, nested_in_group, allow_lossy_export)
         }
         ShapeObject::Group(group) => {
             let mut xml = String::new();
@@ -3210,15 +3296,16 @@ fn serialize_shape_xml(
             }
             xml.push_str(&serialize_out_margin_xml(&group.common));
             if let Some(caption) = &group.caption {
-                xml.push_str(&serialize_caption_xml(caption)?);
+                xml.push_str(&serialize_caption_xml(caption, allow_lossy_export)?);
             }
             xml.push_str(&serialize_shape_component_xml(&group.shape_attr, false));
             for child in &group.children {
-                xml.push_str(&serialize_shape_xml(child, true)?);
+                xml.push_str(&serialize_shape_xml(child, true, allow_lossy_export)?);
             }
             xml.push_str(r#"</hp:container>"#);
             Ok(xml)
         }
+        ShapeObject::Curve(_) if allow_lossy_export => Ok(String::new()),
         ShapeObject::Curve(_) => Err(SerializeError::CfbError(
             "Curve shapes are not written to HWPX yet.".to_string(),
         )),
@@ -3229,6 +3316,7 @@ fn serialize_shape_xml(
                 line.drawing.caption.as_ref(),
                 &line.drawing.shape_attr,
                 nested_in_group,
+                allow_lossy_export,
             )?;
             xml.push_str(&serialize_line_shape_xml(
                 line.drawing.border_line.color,
@@ -3240,7 +3328,7 @@ fn serialize_shape_xml(
                 xml.push_str(&fill_xml);
             }
             if let Some(text_box) = &line.drawing.text_box {
-                xml.push_str(&serialize_draw_text_xml(text_box)?);
+                xml.push_str(&serialize_draw_text_xml(text_box, allow_lossy_export)?);
             }
             xml.push_str(&serialize_shadow_xml(
                 line.drawing.shadow_type as u8,
@@ -3262,6 +3350,7 @@ fn serialize_shape_xml(
                 &rect.drawing.shape_attr,
                 nested_in_group,
                 &format!(r#" ratio="{}""#, rect.round_rate),
+                allow_lossy_export,
             )?;
             xml.push_str(&serialize_line_shape_xml(
                 rect.drawing.border_line.color,
@@ -3273,7 +3362,7 @@ fn serialize_shape_xml(
                 xml.push_str(&fill_xml);
             }
             if let Some(text_box) = &rect.drawing.text_box {
-                xml.push_str(&serialize_draw_text_xml(text_box)?);
+                xml.push_str(&serialize_draw_text_xml(text_box, allow_lossy_export)?);
             }
             xml.push_str(&serialize_shadow_xml(
                 rect.drawing.shadow_type as u8,
@@ -3307,6 +3396,7 @@ fn serialize_shape_xml(
                 &ellipse.drawing.shape_attr,
                 nested_in_group,
                 &extra_attrs,
+                allow_lossy_export,
             )?;
             xml.push_str(&serialize_line_shape_xml(
                 ellipse.drawing.border_line.color,
@@ -3318,7 +3408,7 @@ fn serialize_shape_xml(
                 xml.push_str(&fill_xml);
             }
             if let Some(text_box) = &ellipse.drawing.text_box {
-                xml.push_str(&serialize_draw_text_xml(text_box)?);
+                xml.push_str(&serialize_draw_text_xml(text_box, allow_lossy_export)?);
             }
             xml.push_str(&serialize_shadow_xml(
                 ellipse.drawing.shadow_type as u8,
@@ -3365,6 +3455,7 @@ fn serialize_shape_xml(
                 &arc.drawing.shape_attr,
                 nested_in_group,
                 &format!(r#" type="{}""#, arc_type_to_xml(arc.arc_type)),
+                allow_lossy_export,
             )?;
             xml.push_str(&serialize_line_shape_xml(
                 arc.drawing.border_line.color,
@@ -3376,7 +3467,7 @@ fn serialize_shape_xml(
                 xml.push_str(&fill_xml);
             }
             if let Some(text_box) = &arc.drawing.text_box {
-                xml.push_str(&serialize_draw_text_xml(text_box)?);
+                xml.push_str(&serialize_draw_text_xml(text_box, allow_lossy_export)?);
             }
             xml.push_str(&serialize_shadow_xml(
                 arc.drawing.shadow_type as u8,
@@ -3398,6 +3489,7 @@ fn serialize_shape_xml(
                 polygon.drawing.caption.as_ref(),
                 &polygon.drawing.shape_attr,
                 nested_in_group,
+                allow_lossy_export,
             )?;
             xml.push_str(&serialize_line_shape_xml(
                 polygon.drawing.border_line.color,
@@ -3409,7 +3501,7 @@ fn serialize_shape_xml(
                 xml.push_str(&fill_xml);
             }
             if let Some(text_box) = &polygon.drawing.text_box {
-                xml.push_str(&serialize_draw_text_xml(text_box)?);
+                xml.push_str(&serialize_draw_text_xml(text_box, allow_lossy_export)?);
             }
             xml.push_str(&serialize_shadow_xml(
                 polygon.drawing.shadow_type as u8,
@@ -3433,6 +3525,7 @@ fn start_basic_shape_xml(
     caption: Option<&Caption>,
     shape_attr: &crate::model::shape::ShapeComponentAttr,
     nested_in_group: bool,
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     start_basic_shape_xml_with_extra_attrs(
         tag_name,
@@ -3441,6 +3534,7 @@ fn start_basic_shape_xml(
         shape_attr,
         nested_in_group,
         "",
+        allow_lossy_export,
     )
 }
 
@@ -3451,6 +3545,7 @@ fn start_basic_shape_xml_with_extra_attrs(
     shape_attr: &crate::model::shape::ShapeComponentAttr,
     nested_in_group: bool,
     extra_attrs: &str,
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
@@ -3468,7 +3563,7 @@ fn start_basic_shape_xml_with_extra_attrs(
     }
     xml.push_str(&serialize_out_margin_xml(common));
     if let Some(caption) = caption {
-        xml.push_str(&serialize_caption_xml(caption)?);
+        xml.push_str(&serialize_caption_xml(caption, allow_lossy_export)?);
     }
     xml.push_str(&serialize_shape_component_xml(shape_attr, false));
     Ok(xml)
@@ -3640,6 +3735,7 @@ fn serialize_fill_brush_xml(fill: &crate::model::style::Fill) -> Option<String> 
 
 fn serialize_draw_text_xml(
     text_box: &crate::model::shape::TextBox,
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
@@ -3655,10 +3751,16 @@ fn serialize_draw_text_xml(
             &Paragraph::new_empty(),
             None,
             None,
+            allow_lossy_export,
         )?);
     } else {
         for para in &text_box.paragraphs {
-            xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+            xml.push_str(&serialize_paragraph_xml(
+                para,
+                None,
+                None,
+                allow_lossy_export,
+            )?);
         }
     }
     xml.push_str(r#"</hp:subList>"#);
@@ -3687,7 +3789,10 @@ fn serialize_shadow_xml(
     )
 }
 
-fn serialize_caption_xml(caption: &Caption) -> Result<String, SerializeError> {
+fn serialize_caption_xml(
+    caption: &Caption,
+    allow_lossy_export: bool,
+) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
         r#"<hp:caption side="{}" gap="{}" width="{}" lastWidth="{}" fullSz="{}">"#,
@@ -3706,10 +3811,16 @@ fn serialize_caption_xml(caption: &Caption) -> Result<String, SerializeError> {
             &Paragraph::new_empty(),
             None,
             None,
+            allow_lossy_export,
         )?);
     } else {
         for para in &caption.paragraphs {
-            xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+            xml.push_str(&serialize_paragraph_xml(
+                para,
+                None,
+                None,
+                allow_lossy_export,
+            )?);
         }
     }
     xml.push_str(r#"</hp:subList>"#);
@@ -3721,6 +3832,7 @@ fn serialize_header_footer_control(
     tag_name: &str,
     apply_to: HeaderFooterApply,
     paragraphs: &[Paragraph],
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(
@@ -3730,7 +3842,12 @@ fn serialize_header_footer_control(
     ));
     xml.push_str(r#"<hp:subList>"#);
     for para in paragraphs {
-        xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+        xml.push_str(&serialize_paragraph_xml(
+            para,
+            None,
+            None,
+            allow_lossy_export,
+        )?);
     }
     xml.push_str(r#"</hp:subList>"#);
     xml.push_str(&format!(r#"</hp:{}>"#, tag_name));
@@ -3741,23 +3858,37 @@ fn serialize_note_control(
     tag_name: &str,
     number: u16,
     paragraphs: &[Paragraph],
+    allow_lossy_export: bool,
 ) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(&format!(r#"<hp:{} number="{}">"#, tag_name, number));
     xml.push_str(r#"<hp:subList>"#);
     for para in paragraphs {
-        xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+        xml.push_str(&serialize_paragraph_xml(
+            para,
+            None,
+            None,
+            allow_lossy_export,
+        )?);
     }
     xml.push_str(r#"</hp:subList>"#);
     xml.push_str(&format!(r#"</hp:{}>"#, tag_name));
     Ok(xml)
 }
 
-fn serialize_hidden_comment_control(comment: &HiddenComment) -> Result<String, SerializeError> {
+fn serialize_hidden_comment_control(
+    comment: &HiddenComment,
+    allow_lossy_export: bool,
+) -> Result<String, SerializeError> {
     let mut xml = String::new();
     xml.push_str(r#"<hp:hiddenComment><hp:subList>"#);
     for para in &comment.paragraphs {
-        xml.push_str(&serialize_paragraph_xml(para, None, None)?);
+        xml.push_str(&serialize_paragraph_xml(
+            para,
+            None,
+            None,
+            allow_lossy_export,
+        )?);
     }
     xml.push_str(r#"</hp:subList></hp:hiddenComment>"#);
     Ok(xml)

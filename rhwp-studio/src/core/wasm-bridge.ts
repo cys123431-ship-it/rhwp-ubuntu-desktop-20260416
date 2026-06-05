@@ -144,6 +144,14 @@ export class WasmBridge {
     return (this.ensureDocument() as any).exportHwpx();
   }
 
+  exportHwpxLossy(): Uint8Array {
+    const doc = this.ensureDocument() as any;
+    if (typeof doc.exportHwpxLossy === 'function') {
+      return doc.exportHwpxLossy();
+    }
+    return doc.exportHwpx();
+  }
+
   exportDocx(): Uint8Array {
     const doc = this.ensureDocument() as any;
     if (typeof doc.exportDocx === 'function') {

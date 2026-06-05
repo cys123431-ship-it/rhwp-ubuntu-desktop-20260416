@@ -105,7 +105,9 @@ async function saveDerivedFormat(
 ): Promise<void> {
   const currentName = services.session.current.fileName || `document.${format}`;
   const suggestedName = `${getBaseName(currentName)}.${format}`;
-  const bytes = services.wasm.save(format);
+  const bytes = format === 'hwpx'
+    ? services.wasm.exportHwpxLossy()
+    : services.wasm.exportHwp();
   const result = await services.documentIO.saveBinaryFile({
     suggestedName,
     format,

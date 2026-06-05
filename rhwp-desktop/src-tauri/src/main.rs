@@ -168,6 +168,30 @@ fn binary_extension_for_format(format: &str) -> &'static str {
     }
 }
 
+fn document_extension_for_format(format: &str) -> &'static str {
+    if format.eq_ignore_ascii_case("hwpx") {
+        ".hwpx"
+    } else {
+        ".hwp"
+    }
+}
+
+fn normalize_path_extension(path: PathBuf, extension: &str) -> PathBuf {
+    let target = extension.trim_start_matches('.');
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case(target))
+        .unwrap_or(false)
+    {
+        return path;
+    }
+
+    let mut normalized = path;
+    normalized.set_extension(target);
+    normalized
+}
+
 fn normalize_binary_name(file_name: &str, format: &str) -> String {
     let extension = binary_extension_for_format(format);
 
@@ -763,6 +787,10 @@ fn save_document(
         }
     };
 
+    let selected_path = normalize_path_extension(
+        selected_path,
+        document_extension_for_format(&request.format),
+    );
     let selected_path = validate_safe_path(&app, &selected_path)?;
 
     if let Some(parent) = selected_path.parent() {
@@ -804,6 +832,8 @@ fn save_binary_file(app: AppHandle, request: SaveBinaryRequest) -> Result<Option
         }
     };
 
+    let selected_path =
+        normalize_path_extension(selected_path, binary_extension_for_format(&request.format));
     let selected_path = validate_safe_path(&app, &selected_path)?;
 
     if let Some(parent) = selected_path.parent() {

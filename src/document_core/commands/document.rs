@@ -339,6 +339,20 @@ impl DocumentCore {
                 snapshot: self.hwpx_package_snapshot.as_ref(),
                 dirty_sections: Some(&self.dirty_sections),
                 doc_info_dirty: self.document.doc_info.raw_stream_dirty,
+                allow_lossy_export: false,
+            },
+        )
+        .map_err(|e| HwpError::RenderError(e.to_string()))
+    }
+
+    pub fn export_hwpx_lossy_native(&self) -> Result<Vec<u8>, HwpError> {
+        crate::serializer::serialize_hwpx_with_context(
+            &self.document,
+            crate::serializer::HwpxPreservationContext {
+                snapshot: None,
+                dirty_sections: Some(&self.dirty_sections),
+                doc_info_dirty: self.document.doc_info.raw_stream_dirty,
+                allow_lossy_export: true,
             },
         )
         .map_err(|e| HwpError::RenderError(e.to_string()))

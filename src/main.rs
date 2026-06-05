@@ -2040,7 +2040,7 @@ fn convert_format(args: &[String]) {
 
     let bytes = match output_ext.as_str() {
         "hwp" => core.export_hwp_native(),
-        "hwpx" => core.export_hwpx_native(),
+        "hwpx" => core.export_hwpx_lossy_native(),
         _ => {
             eprintln!(
                 "error: output extension must be .hwp or .hwpx, got {}",

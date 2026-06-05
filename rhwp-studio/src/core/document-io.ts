@@ -535,6 +535,10 @@ function createActiveDesktopDocumentIO(): DesktopDocumentIO | null {
   return null;
 }
 
+function toIpcBytes(bytes: Uint8Array): number[] {
+  return Array.from(bytes);
+}
+
 function createTauriBridge(): RhwpDesktopBridge | null {
   const invoke = window.__TAURI__?.core?.invoke;
   if (!invoke) return null;
@@ -543,8 +547,18 @@ function createTauriBridge(): RhwpDesktopBridge | null {
     openDocument: () => invoke<OpenDocumentResult | null>('open_document'),
     openDocumentAtPath: (path) => invoke<OpenDocumentResult>('open_document_at_path', { path }),
     consumeStartupFiles: () => invoke<OpenDocumentResult[]>('consume_startup_files'),
-    saveDocument: (request) => invoke<SaveDocumentResult | null>('save_document', { request }),
-    saveBinaryFile: (request) => invoke<SaveBinaryResult | null>('save_binary_file', { request }),
+    saveDocument: (request) => invoke<SaveDocumentResult | null>('save_document', {
+      request: {
+        ...request,
+        bytes: toIpcBytes(request.bytes),
+      },
+    }),
+    saveBinaryFile: (request) => invoke<SaveBinaryResult | null>('save_binary_file', {
+      request: {
+        ...request,
+        bytes: toIpcBytes(request.bytes),
+      },
+    }),
     pickExportDirectory: () => invoke<string | null>('pick_export_directory'),
     exportPdfFromSvgs: (svgs) => invoke<Uint8Array>('export_pdf_from_svgs', { svgs }),
     getRecentDocuments: () => invoke<RecentDocument[]>('get_recent_documents'),
@@ -552,7 +566,12 @@ function createTauriBridge(): RhwpDesktopBridge | null {
     setDefaultFileAssociation: () => invoke<FileAssociationStatus>('set_default_file_association'),
     listRecoverySnapshots: () => invoke<RecoverySnapshotMeta[]>('list_recovery_snapshots'),
     readRecoverySnapshot: (snapshotId) => invoke<RecoverySnapshotPayload>('read_recovery_snapshot', { snapshotId }),
-    writeRecoverySnapshot: (request) => invoke<RecoverySnapshotMeta>('write_recovery_snapshot', { request }),
+    writeRecoverySnapshot: (request) => invoke<RecoverySnapshotMeta>('write_recovery_snapshot', {
+      request: {
+        ...request,
+        bytes: toIpcBytes(request.bytes),
+      },
+    }),
     deleteRecoverySnapshot: (snapshotId) => invoke<void>('delete_recovery_snapshot', { snapshotId }),
     revealInFolder: (path) => invoke<void>('reveal_in_folder', { path }),
     onOpenFiles: (handler) => {
