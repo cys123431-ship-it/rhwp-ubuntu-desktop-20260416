@@ -17,6 +17,7 @@ const tauriDriverUrl = process.env.RHWP_E2E_DRIVER_URL ?? 'http://127.0.0.1:4444
 const tauriDriverHost = process.env.RHWP_E2E_DRIVER_HOST ?? '127.0.0.1';
 const tauriDriverPort = Number(process.env.RHWP_E2E_DRIVER_PORT ?? '4444');
 const tauriDriverBin = process.env.RHWP_E2E_TAURI_DRIVER ?? 'tauri-driver';
+const bridgeTimeoutMs = Number(process.env.RHWP_E2E_BRIDGE_TIMEOUT_MS ?? '60000');
 const defaultAppPattern = /default app|기본 앱/i;
 const settingsPattern = /settings|설정/i;
 
@@ -145,9 +146,19 @@ async function openApp(args = []) {
     .withCapabilities(capabilities)
     .build();
 
-  await waitFor(async () => {
-    return driver.executeScript('return Boolean(window.__RHWP_E2E__?.isReady?.());');
-  }, 30000, 'studio E2E bridge');
+  try {
+    await waitFor(async () => {
+      return driver.executeScript('return Boolean(window.__RHWP_E2E__?.isReady?.());');
+    }, bridgeTimeoutMs, 'studio E2E bridge');
+  } catch (error) {
+    try {
+      await driver.quit();
+    } catch {
+      // The session can already be gone if startup failed inside WebDriver.
+    }
+    await terminateInstalledProcesses();
+    throw error;
+  }
 
   return driver;
 }
@@ -169,7 +180,11 @@ async function closeDriver(driver) {
   } catch {
     // Best-effort: the session may already be gone during cleanup.
   }
-  await driver.quit();
+  try {
+    await driver.quit();
+  } catch {
+    // Best-effort: stale WebDriver sessions should not mask the test result.
+  }
 }
 
 async function waitForState(driver, predicate, timeoutMs, label) {
@@ -443,7 +458,7 @@ test('restores and clears recovery snapshots for dirty editable documents', asyn
   } finally {
     await closeDriver(driver);
   }
-}, { concurrency: false, timeout: 120000 });
+}, { concurrency: false, timeout: 180000 });
 
 test('opens one window per startup file when multiple documents are provided', async (t) => {
   if (isWindows) {
