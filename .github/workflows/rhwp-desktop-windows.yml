@@ -305,7 +305,8 @@ jobs:
           if (-not $installer) {
             throw "MSI installer was not found."
           }
-          $process = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', $installer.FullName, '/qn', 'ALLUSERS=1') -PassThru -Wait
+          $msiArgs = "/i `"$($installer.FullName)`" /qn ALLUSERS=1"
+          $process = Start-Process -FilePath msiexec.exe -ArgumentList $msiArgs -PassThru -Wait
           if ($process.ExitCode -ne 0) {
             throw "MSI installer failed with exit code $($process.ExitCode)"
           }
