@@ -19,6 +19,7 @@ const tauriDriverPort = Number(process.env.RHWP_E2E_DRIVER_PORT ?? '4444');
 const tauriDriverBin = process.env.RHWP_E2E_TAURI_DRIVER ?? 'tauri-driver';
 const bridgeTimeoutMs = Number(process.env.RHWP_E2E_BRIDGE_TIMEOUT_MS ?? '60000');
 const skipRecoveryE2E = process.env.RHWP_E2E_SKIP_RECOVERY === '1';
+const skipStartupSampleE2E = process.env.RHWP_E2E_SKIP_STARTUP_SAMPLE === '1';
 const defaultAppPattern = /default app|기본 앱/i;
 const settingsPattern = /settings|설정/i;
 
@@ -316,7 +317,12 @@ test('shows the default-app banner and handles platform-specific registration fl
   }
 }, { concurrency: false, timeout: 60000 });
 
-test('opens the Wave 2 representative HWPX sample as editable-safe', async () => {
+test('opens the Wave 2 representative HWPX sample as editable-safe', async (t) => {
+  if (skipStartupSampleE2E) {
+    t.skip('Startup sample open is covered by package command-line smoke tests.');
+    return;
+  }
+
   const samplePath = path.resolve(repoRoot, 'samples', 'tac-img-02.hwpx');
   const driver = await openApp([samplePath]);
 

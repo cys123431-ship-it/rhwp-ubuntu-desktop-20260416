@@ -255,6 +255,7 @@ jobs:
         working-directory: rhwp-desktop
         env:
           RHWP_E2E_APP: C:\Program Files\rhwp\rhwp.exe
+          RHWP_E2E_SKIP_STARTUP_SAMPLE: '1'
         run: npm run e2e:installed
 
   smoke-msi:
@@ -376,6 +377,7 @@ jobs:
         working-directory: rhwp-desktop
         env:
           RHWP_E2E_APP: C:\Program Files\rhwp\rhwp.exe
+          RHWP_E2E_SKIP_STARTUP_SAMPLE: '1'
         run: npm run e2e:installed
 
   publish-release:
