@@ -11,7 +11,8 @@
     "e2e:block-font-size": "node e2e/block-font-size-shortcuts.test.mjs",
     "e2e:toolbar-core": "node e2e/toolbar-core.test.mjs",
     "e2e:selection-visual": "node e2e/selection-visual.test.mjs",
-    "test:shortcuts": "node e2e/shortcut-map-static.test.mjs && node e2e/toolbar-command-static.test.mjs"
+    "test:shortcuts": "node e2e/shortcut-map-static.test.mjs && node e2e/toolbar-command-static.test.mjs",
+    "e2e:keyboard": "node e2e/keyboard-shortcut-regression.test.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.40",

@@ -69,4 +69,34 @@ runTest('Ctrl+A visual selection covers wrapped document end', async ({ page }) 
   );
 
   await screenshot(page, 'selection-visual-ctrl-a');
+
+  const canvas = await page.$('#scroll-container canvas');
+  const box = await canvas?.boundingBox();
+  if (!box) throw new Error('canvas bounding box is unavailable');
+
+  await page.mouse.move(box.x + 115, box.y + 140);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 400, box.y + 247, { steps: 1 });
+  await page.mouse.up();
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
+
+  const dragState = await page.evaluate(() => {
+    const selection = window.__inputHandler?.getSelection?.() ?? null;
+    const rects = selection
+      ? window.__wasm?.getSelectionRects?.(
+          selection.start.sectionIndex,
+          selection.start.paragraphIndex,
+          selection.start.charOffset,
+          selection.end.paragraphIndex,
+          selection.end.charOffset,
+        ) ?? []
+      : [];
+    return { selection, rects };
+  });
+  const dragRows = uniqueRows(dragState.rects);
+  assert(
+    dragState.selection?.end?.charOffset - dragState.selection?.start?.charOffset > 100,
+    `fast drag applies the mouseup endpoint (${JSON.stringify(dragState.selection)})`,
+  );
+  assert(dragRows.length >= 5, `fast drag reaches the final pointer row (${dragRows.length})`);
 });

@@ -680,17 +680,6 @@ export function onKeyDown(this: any, e: KeyboardEvent): void {
       this.updateCellSelection();
       return;
     }
-    // M: 셀 합치기, S: 셀 나누기
-    if (e.key === 'm' || e.key === 'M') {
-      e.preventDefault();
-      this.dispatcher?.dispatch('table:cell-merge');
-      return;
-    }
-    if (e.key === 's' || e.key === 'S') {
-      e.preventDefault();
-      this.dispatcher?.dispatch('table:cell-split');
-      return;
-    }
     // 수정자 키(Shift/Ctrl/Alt/Meta)만 누른 경우 무시
     if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') {
       return;
@@ -1469,4 +1458,3 @@ export function handleShiftF11(this: any): void {
     console.warn('[Shift+F11] error:', err);
   }
 }
-

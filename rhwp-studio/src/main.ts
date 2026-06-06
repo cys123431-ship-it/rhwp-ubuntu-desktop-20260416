@@ -26,6 +26,14 @@ import { TableObjectRenderer } from '@/engine/table-object-renderer';
 import { TableResizeRenderer } from '@/engine/table-resize-renderer';
 import { Ruler } from '@/view/ruler';
 import { showConfirm, showSavePrompt } from '@/ui/confirm-dialog';
+import {
+  beginShortcutChord,
+  matchShortcut,
+  resolveShortcutChord,
+  syncShortcutLabels,
+  type PendingShortcutChord,
+  type ShortcutHost,
+} from '@/command/shortcut-map';
 
 const wasm = new WasmBridge();
 const eventBus = new EventBus();
@@ -142,6 +150,7 @@ registry.registerAll(insertCommands);
 registry.registerAll(tableCommands);
 registry.registerAll(pageCommands);
 registry.registerAll(toolCommands);
+syncShortcutLabels(registry, document);
 
 // 상태 바 요소
 const sbMessage = () => document.getElementById('sb-message')!;
@@ -880,22 +889,40 @@ async function initialize(): Promise<void> {
  * 예: 문서 미로드 상태에서도 Alt+N(새 문서), Ctrl+O(열기) 등.
  */
 function setupGlobalShortcuts(): void {
+  let pendingChord: PendingShortcutChord | null = null;
+
   document.addEventListener('keydown', (e) => {
-    // input/textarea 등 편집 가능 요소 내부에서는 무시
     const target = e.target as HTMLElement;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
-    // InputHandler가 활성 상태이면 자체 처리에 맡김
-    if (inputHandler?.isActive()) return;
+    const isEditableTarget =
+      target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || target instanceof HTMLSelectElement
+      || target.isContentEditable;
+    if (isEditableTarget || e.defaultPrevented || e.isComposing) return;
 
-    const ctrlOrMeta = e.ctrlKey || e.metaKey;
+    const host = (inputHandler ?? {}) as unknown as ShortcutHost;
 
-    // Alt+N / Alt+ㅜ → 새 문서 (문서 미로드 상태에서도 동작)
-    if (e.altKey && !ctrlOrMeta && !e.shiftKey) {
-      if (e.key === 'n' || e.key === 'N' || e.key === 'ㅜ') {
+    if (pendingChord) {
+      const commandId = resolveShortcutChord(e, pendingChord, host);
+      pendingChord = null;
+      if (commandId) {
         e.preventDefault();
-        dispatcher.dispatch('file:new-doc');
-        return true;
+        dispatcher.dispatch(commandId);
+        return;
       }
+    }
+
+    const commandId = matchShortcut(e, host);
+    if (commandId) {
+      e.preventDefault();
+      dispatcher.dispatch(commandId);
+      return;
+    }
+
+    const chord = beginShortcutChord(e, host);
+    if (chord) {
+      e.preventDefault();
+      pendingChord = chord;
     }
   }, false);
 }

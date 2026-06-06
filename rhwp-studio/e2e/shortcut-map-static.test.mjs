@@ -26,6 +26,7 @@ function assert(condition, message) {
 }
 
 const shortcutSource = read('src/command/shortcut-map.ts');
+const mainSource = read('src/main.ts');
 const bindings = [...shortcutSource.matchAll(/(?:single|chord)\('([^']+)'\s*,\s*'([^']+)'/g)]
   .map((match) => ({ commandId: match[1], label: match[2] }));
 
@@ -54,6 +55,18 @@ assert(hasBinding('format:font-size-increase', 'Ctrl+]'), 'font-size increase ke
 assert(hasBinding('format:font-size-increase', 'Alt+Shift+E'), 'font-size increase has Hancom Alt+Shift+E alias');
 assert(hasBinding('format:font-size-decrease', 'Ctrl+['), 'font-size decrease keeps Ctrl+[ alias');
 assert(hasBinding('format:font-size-decrease', 'Alt+Shift+R'), 'font-size decrease has Hancom Alt+Shift+R alias');
+assert(hasBinding('edit:find', 'Ctrl+F'), 'find uses the displayed Ctrl+F shortcut');
+assert(hasBinding('page:setup', 'F7'), 'page setup uses the displayed F7 shortcut');
+assert(!hasBinding('table:cell-split', 'S'), 'plain S remains available for text input');
+assert(!hasBinding('table:cell-merge', 'M'), 'plain M remains available for text input');
+assert(
+  mainSource.includes('syncShortcutLabels(registry, document)'),
+  'displayed shortcut labels are synchronized from the executable shortcut map',
+);
+assert(
+  mainSource.includes('const commandId = matchShortcut(e, host)'),
+  'global keydown handler dispatches configured shortcuts outside the editor textarea',
+);
 assert(
   shortcutSource.includes("keypad('+', 'NumpadAdd', { shift: true })"),
   'zoom-in Shift+Num + is limited to the numeric keypad add key',

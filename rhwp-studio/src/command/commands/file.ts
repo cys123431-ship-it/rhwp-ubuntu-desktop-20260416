@@ -137,15 +137,23 @@ async function exportPdf(services: CommandServices): Promise<void> {
       if (statusEl) {
         statusEl.textContent = `PDF 생성 중... (${index + 1}/${pageCount})`;
       }
-      svgPages.push(services.wasm.renderPageSvg(index));
+      const svg = services.wasm.renderPageSvg(index);
+      if (!svg.includes('<svg')) {
+        throw new Error(`${index + 1}쪽 렌더링 결과가 올바른 SVG가 아닙니다.`);
+      }
+      svgPages.push(svg);
       if (index % 4 === 0) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
 
     const pdfBytes = await services.documentIO.exportPdfFromSvgs(svgPages);
-    if (!pdfBytes) {
+    if (!pdfBytes || pdfBytes.length < 5) {
       throw new Error('PDF 변환 엔진을 사용할 수 없습니다.');
+    }
+    const pdfHeader = new TextDecoder('ascii').decode(pdfBytes.slice(0, 5));
+    if (pdfHeader !== '%PDF-') {
+      throw new Error('PDF 변환 결과가 손상되었습니다.');
     }
 
     const result = await services.documentIO.saveBinaryFile({
@@ -166,6 +174,15 @@ async function exportPdf(services: CommandServices): Promise<void> {
 
 async function exportDocx(services: CommandServices): Promise<void> {
   const bytes = services.wasm.exportDocx();
+  if (
+    bytes.length < 4
+    || bytes[0] !== 0x50
+    || bytes[1] !== 0x4b
+    || bytes[2] !== 0x03
+    || bytes[3] !== 0x04
+  ) {
+    throw new Error('Word 변환 결과가 손상되었습니다.');
+  }
   const result = await services.documentIO.saveBinaryFile({
     suggestedName: `${getBaseName(services.session.current.fileName)}.docx`,
     format: 'docx',

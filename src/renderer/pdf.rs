@@ -111,7 +111,6 @@ pub fn svgs_to_pdf(svg_pages: &[String]) -> Result<Vec<u8>, String> {
 
     for pd in &page_datas {
         let page_ref = alloc.bump();
-        let content_ref = alloc.bump();
         page_refs.push(page_ref);
 
         // chunk 재번호화
@@ -166,7 +165,36 @@ pub fn svgs_to_pdf(svg_pages: &[String]) -> Result<Vec<u8>, String> {
     // 문서 정보
     let info_ref = alloc.bump();
     pdf.document_info(info_ref)
-        .producer(pdf_writer::TextStr("rhwp"));
+        .producer(pdf_writer::TextStr("Geulbit X"));
 
     Ok(pdf.finish())
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    fn test_svg(label: &str) -> String {
+        format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\">\
+             <rect width=\"200\" height=\"100\" fill=\"white\"/>\
+             <text x=\"10\" y=\"50\" font-family=\"sans-serif\" font-size=\"16\">{}</text>\
+             </svg>",
+            label
+        )
+    }
+
+    #[test]
+    fn creates_valid_single_page_pdf() {
+        let pdf = svg_to_pdf(&test_svg("Geulbit X")).expect("create pdf");
+        assert!(pdf.starts_with(b"%PDF-"));
+        assert!(pdf.len() > 500);
+    }
+
+    #[test]
+    fn creates_valid_multi_page_pdf() {
+        let pdf = svgs_to_pdf(&[test_svg("page 1"), test_svg("page 2")]).expect("create pdf");
+        assert!(pdf.starts_with(b"%PDF-"));
+        assert!(pdf.len() > 1000);
+    }
 }

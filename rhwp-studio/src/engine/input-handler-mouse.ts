@@ -1107,7 +1107,10 @@ export function onMouseMove(this: any, e: MouseEvent): void {
     this.dragRafId = requestAnimationFrame(() => {
       this.dragRafId = 0;
       if (!this.isDragging) return;
-      this.updateDragSelectionAt(e.clientX, e.clientY);
+      const point = this.lastDragPoint;
+      if (point) {
+        this.updateDragSelectionAt(point.clientX, point.clientY);
+      }
     });
     return;
   }
@@ -1358,6 +1361,7 @@ export function onMouseUp(this: any, _e: MouseEvent): void {
   }
 
   if (!this.isDragging) return;
+  this.updateDragSelectionAt(_e.clientX, _e.clientY);
   this.isDragging = false;
   if (this.dragRafId) {
     cancelAnimationFrame(this.dragRafId);

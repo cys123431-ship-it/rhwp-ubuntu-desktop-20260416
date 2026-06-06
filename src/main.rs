@@ -13,6 +13,7 @@ fn main() {
         Some("--version") | Some("-V") => println!("rhwp v{}", rhwp::version()),
         Some("export-svg") => export_svg(&args[2..]),
         Some("export-pdf") => export_pdf(&args[2..]),
+        Some("export-docx") => export_docx(&args[2..]),
         Some("info") => show_info(&args[2..]),
         Some("dump") => dump_controls(&args[2..]),
         Some("dump-pages") => dump_pages(&args[2..]),
@@ -55,6 +56,12 @@ fn print_help() {
     println!("      --embed-fonts           폰트 서브셋 임베딩 (사용 글자만 base64)");
     println!("      --embed-fonts=full      폰트 전체 임베딩 (base64)");
     println!("      --font-path <경로>      폰트 파일 탐색 경로 (여러 번 지정 가능)");
+    println!();
+    println!("  export-pdf <파일.hwp|파일.hwpx> [-o 출력.pdf] [-p 페이지]");
+    println!("      문서를 PDF로 내보내기");
+    println!();
+    println!("  export-docx <파일.hwp|파일.hwpx> [-o 출력.docx]");
+    println!("      문서를 Word DOCX로 내보내기");
     println!();
     println!("  info <파일.hwp>");
     println!("      HWP 파일 정보 표시");
@@ -402,6 +409,69 @@ fn export_pdf(args: &[String]) {
     }
 
     println!("PDF 내보내기 완료");
+}
+
+fn export_docx(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("오류: HWP/HWPX 파일 경로를 지정해주세요.");
+        eprintln!("사용법: rhwp export-docx <파일.hwp|파일.hwpx> [-o 출력.docx]");
+        return;
+    }
+
+    let file_path = &args[0];
+    let mut output_file = String::new();
+    let mut i = 1;
+    while i < args.len() {
+        if matches!(args[i].as_str(), "--output" | "-o") && i + 1 < args.len() {
+            output_file = args[i + 1].clone();
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    if output_file.is_empty() {
+        let stem = Path::new(file_path)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("output");
+        output_file = format!("output/{}.docx", stem);
+    }
+
+    let data = match fs::read(file_path) {
+        Ok(data) => data,
+        Err(error) => {
+            eprintln!("오류: 파일을 읽을 수 없습니다 - {}: {}", file_path, error);
+            return;
+        }
+    };
+    let core = match rhwp::document_core::DocumentCore::from_bytes(&data) {
+        Ok(core) => core,
+        Err(error) => {
+            eprintln!("오류: 문서 파싱 실패 - {}", error);
+            return;
+        }
+    };
+    let bytes = match rhwp::export::docx::export_document(&core) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("오류: DOCX 변환 실패 - {}", error);
+            return;
+        }
+    };
+
+    let output_path = Path::new(&output_file);
+    if let Some(parent) = output_path.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            eprintln!("오류: 출력 폴더 생성 실패 - {}", error);
+            return;
+        }
+    }
+    if let Err(error) = fs::write(output_path, bytes) {
+        eprintln!("오류: DOCX 저장 실패 - {}", error);
+        return;
+    }
+    println!("DOCX 내보내기 완료: {}", output_file);
 }
 
 fn show_info(args: &[String]) {

@@ -30,7 +30,7 @@ export interface PendingShortcutChord {
   commandIds: string[];
 }
 
-type ShortcutHost = {
+export type ShortcutHost = {
   cursor?: {
     isInCell?: () => boolean;
     isInTextBox?: () => boolean;
@@ -101,7 +101,6 @@ export const hancomShortcuts: ShortcutBinding[] = [
   single('file:save', 'Ctrl+S', ctrl('s')),
   single('file:save', 'Alt+S', alt('s')),
   single('file:save-as', 'Ctrl+Shift+S', ctrl('s', { shift: true })),
-  single('file:save-as', 'Alt+V', alt('v')),
   single('file:print', 'Ctrl+P', ctrl('p')),
   single('file:print', 'Alt+P', alt('p')),
 
@@ -114,6 +113,7 @@ export const hancomShortcuts: ShortcutBinding[] = [
   single('edit:format-copy', 'Alt+C', alt('c')),
   single('edit:delete', 'Ctrl+E', ctrl('e')),
   single('edit:select-all', 'Ctrl+A', ctrl('a')),
+  single('edit:find', 'Ctrl+F', ctrl('f')),
   chord('edit:find', 'Ctrl+Q,F', ctrl('q'), plain('f')),
   single('edit:find-replace', 'Ctrl+F2', ctrl('f2')),
   single('edit:find-again', 'Ctrl+L', ctrl('l')),
@@ -137,6 +137,7 @@ export const hancomShortcuts: ShortcutBinding[] = [
   single('format:align-center', 'Alt+Shift+C', alt('c', { shift: true })),
   single('format:align-distribute', 'Alt+Shift+D', alt('d', { shift: true })),
   single('format:style-dialog', 'F6', plain('f6')),
+  single('page:setup', 'F7', plain('f7')),
 
   single('insert:symbols', 'Alt+F10', alt('f10')),
   chord('insert:bookmark', 'Ctrl+K,B', ctrl('k'), plain('b')),
@@ -151,8 +152,6 @@ export const hancomShortcuts: ShortcutBinding[] = [
   single('table:insert-row-below', 'Ctrl+Enter', ctrl('enter'), ['table']),
   single('table:insert-col-left', 'Alt+Insert', alt('insert'), ['table']),
   single('table:delete-col', 'Alt+Delete', alt('delete'), ['table']),
-  single('table:cell-split', 'S', plain('s'), ['table-selection']),
-  single('table:cell-merge', 'M', plain('m'), ['table-selection']),
 
   chord('field:edit', 'Ctrl+N,K', ctrl('n'), plain('k')),
 
@@ -296,13 +295,13 @@ export function syncShortcutLabels(registry: CommandRegistry, root?: ParentNode 
 
   if (!root) return;
 
-  const menuItems = root.querySelectorAll<HTMLElement>('.md-item[data-cmd]');
-  for (const item of menuItems) {
+  const commandItems = root.querySelectorAll<HTMLElement>('[data-cmd]');
+  for (const item of commandItems) {
     const commandId = item.dataset.cmd;
     if (!commandId) continue;
 
     const label = getShortcutLabel(commandId);
-    let shortcutEl = item.querySelector<HTMLElement>('.md-shortcut');
+    let shortcutEl = item.querySelector<HTMLElement>('.md-shortcut, .tb-split-shortcut');
 
     if (!label) {
       shortcutEl?.remove();
@@ -311,7 +310,9 @@ export function syncShortcutLabels(registry: CommandRegistry, root?: ParentNode 
 
     if (!shortcutEl) {
       shortcutEl = document.createElement('span');
-      shortcutEl.className = 'md-shortcut';
+      shortcutEl.className = item.classList.contains('tb-split-item')
+        ? 'tb-split-shortcut'
+        : 'md-shortcut';
       item.appendChild(shortcutEl);
     }
     shortcutEl.textContent = label;
