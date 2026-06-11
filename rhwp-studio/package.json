@@ -15,7 +15,7 @@
     "e2e:keyboard": "node e2e/keyboard-shortcut-regression.test.mjs"
   },
   "devDependencies": {
-    "@types/chrome": "^0.1.40",
+    "@types/chrome": "^0.1.43",
     "puppeteer-core": "^24.40.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.8"
