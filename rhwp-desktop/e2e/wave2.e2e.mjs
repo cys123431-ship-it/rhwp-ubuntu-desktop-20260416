@@ -17,6 +17,7 @@ const tauriDriverUrl = process.env.RHWP_E2E_DRIVER_URL ?? 'http://127.0.0.1:4444
 const tauriDriverHost = process.env.RHWP_E2E_DRIVER_HOST ?? '127.0.0.1';
 const tauriDriverPort = Number(process.env.RHWP_E2E_DRIVER_PORT ?? '4444');
 const tauriDriverBin = process.env.RHWP_E2E_TAURI_DRIVER ?? 'tauri-driver';
+const tauriNativeDriver = process.env.RHWP_E2E_NATIVE_DRIVER;
 const bridgeTimeoutMs = Number(process.env.RHWP_E2E_BRIDGE_TIMEOUT_MS ?? '60000');
 const skipRecoveryE2E = process.env.RHWP_E2E_SKIP_RECOVERY === '1';
 const skipStartupSampleE2E = process.env.RHWP_E2E_SKIP_STARTUP_SAMPLE === '1';
@@ -206,7 +207,8 @@ async function launchAdditionalInstance(args = []) {
 before(async () => {
   await access(installedBinary);
   tempRoot = await mkdtemp(path.join(os.tmpdir(), 'rhwp-wave2-e2e-'));
-  tauriDriverProcess = spawn(tauriDriverBin, [], {
+  const tauriDriverArgs = tauriNativeDriver ? ['--native-driver', tauriNativeDriver] : [];
+  tauriDriverProcess = spawn(tauriDriverBin, tauriDriverArgs, {
     stdio: 'inherit',
     env: process.env,
     windowsHide: true,
