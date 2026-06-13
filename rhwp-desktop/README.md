@@ -20,7 +20,7 @@ Desktop wrapper for `Geulbit X` on Ubuntu and Windows.
 3. If the session banner offers `Set as default app`, click it once.
 4. After that, `.hwp` and `.hwpx` files can be opened by double-click in Nautilus.
 
-The app uses `xdg-mime default rhwp.desktop application/x-hwp application/x-hwpx` for user-level default-app registration.
+The app keeps the compatibility launcher ID `rhwp.desktop` and registers it with `application/x-hwp`, the primary HWPX MIME type `application/vnd.hancom.hwpx`, and the legacy alias `application/x-hwpx`.
 
 ### Windows
 
@@ -53,7 +53,9 @@ Ubuntu packaging assets live under [packaging/linux](./packaging/linux).
 
 1. On Ubuntu 22.04 or newer, install the Tauri Linux prerequisites.
 2. Run `npm run build:linux` inside `rhwp-desktop`.
-3. Pick up the generated `.deb` from `src-tauri/target/release/bundle/deb/`.
+3. Pick up the generated `.deb` from `src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/`.
+
+The Linux package intentionally keeps `/usr/bin/rhwp`, `rhwp.desktop`, and the `rhwp` Debian package name for upgrade and file-association compatibility. The launcher name, window title, package description, and other user-facing text use `Geulbit X`.
 
 ## Windows package build
 

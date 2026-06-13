@@ -1,4 +1,4 @@
-name: Ubuntu Desktop Package
+name: Geulbit X Ubuntu Desktop Package
 
 on:
   push:
@@ -260,7 +260,8 @@ jobs:
           DEB_PATH="$(find "$PWD/dist" -type f -name '*.deb' | head -n 1)"
           test -n "$DEB_PATH"
           DEB_PACKAGE_NAME="$(dpkg-deb -f "$DEB_PATH" Package)"
-          test -n "$DEB_PACKAGE_NAME"
+          test "$DEB_PACKAGE_NAME" = "rhwp"
+          dpkg-deb -f "$DEB_PATH" Description | grep -F 'Geulbit X'
           echo "DEB_PACKAGE_NAME=$DEB_PACKAGE_NAME" >> "$GITHUB_ENV"
           sudo dpkg -i "$DEB_PATH" || sudo apt-get install -y -f
 
@@ -269,8 +270,20 @@ jobs:
           dpkg -L "$DEB_PACKAGE_NAME" | grep '/usr/share/applications/rhwp.desktop'
           dpkg -L "$DEB_PACKAGE_NAME" | grep '/usr/share/mime/packages/rhwp-mime.xml'
           dpkg -L "$DEB_PACKAGE_NAME" | grep '/usr/bin/rhwp$'
+          test -x /usr/bin/rhwp
+          grep -Fx 'Name=Geulbit X' /usr/share/applications/rhwp.desktop
+          grep -Fx 'Exec=rhwp %F' /usr/share/applications/rhwp.desktop
+          grep -Fx 'MimeType=application/x-hwp;application/vnd.hancom.hwpx;application/x-hwpx;' /usr/share/applications/rhwp.desktop
+          grep -F '<mime-type type="application/x-hwp">' /usr/share/mime/packages/rhwp-mime.xml
+          grep -F '<mime-type type="application/vnd.hancom.hwpx">' /usr/share/mime/packages/rhwp-mime.xml
+          grep -F '<alias type="application/x-hwpx"/>' /usr/share/mime/packages/rhwp-mime.xml
           desktop-file-validate /usr/share/applications/rhwp.desktop
           update-mime-database /usr/share/mime
+          printf 'Geulbit X HWP MIME check' > /tmp/geulbit-x-mime-check.hwp
+          printf 'Geulbit X HWPX MIME check' > /tmp/geulbit-x-mime-check.hwpx
+          test "$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwp)" = "application/x-hwp"
+          test "$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwpx)" = "application/vnd.hancom.hwpx"
+          rm -f /tmp/geulbit-x-mime-check.hwp /tmp/geulbit-x-mime-check.hwpx
 
       - name: Install WebDriver test dependencies
         working-directory: rhwp-desktop
@@ -298,7 +311,7 @@ jobs:
       - name: Publish desktop E2E summary
         run: |
           {
-            echo "## Ubuntu Desktop E2E"
+            echo "## Geulbit X Ubuntu Desktop E2E"
             echo
             echo "- Installed package: \`$DEB_PACKAGE_NAME\`"
             echo "- Display matrix target: \`${{ matrix.ubuntu-version }}\`"
@@ -326,3 +339,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/**/*.deb
+          name: Geulbit X ${{ github.ref_name }}
+          generate_release_notes: true

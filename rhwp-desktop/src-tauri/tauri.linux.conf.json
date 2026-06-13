@@ -11,8 +11,6 @@
     "linux": {
       "deb": {
         "depends": [
-          "libgtk-3-0",
-          "libwebkit2gtk-4.1-0",
           "xdg-utils"
         ],
         "postInstallScript": "../packaging/linux/postinst",
