@@ -2,11 +2,11 @@
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-hwp">
     <comment>Hangul Word Processor document</comment>
-    <glob pattern="*.hwp"/>
+    <glob pattern="*.hwp" weight="100"/>
   </mime-type>
   <mime-type type="application/vnd.hancom.hwpx">
     <comment>Hangul Word Processor XML document</comment>
-    <glob pattern="*.hwpx"/>
+    <glob pattern="*.hwpx" weight="100"/>
     <alias type="application/x-hwpx"/>
   </mime-type>
 </mime-info>

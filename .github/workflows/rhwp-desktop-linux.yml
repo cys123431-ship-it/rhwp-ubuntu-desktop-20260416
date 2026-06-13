@@ -274,15 +274,21 @@ jobs:
           grep -Fx 'Name=Geulbit X' /usr/share/applications/rhwp.desktop
           grep -Fx 'Exec=rhwp %F' /usr/share/applications/rhwp.desktop
           grep -Fx 'MimeType=application/x-hwp;application/vnd.hancom.hwpx;application/x-hwpx;' /usr/share/applications/rhwp.desktop
-          grep -F '<mime-type type="application/x-hwp">' /usr/share/mime/packages/rhwp-mime.xml
-          grep -F '<mime-type type="application/vnd.hancom.hwpx">' /usr/share/mime/packages/rhwp-mime.xml
+          grep -F '<glob pattern="*.hwp" weight="100"/>' /usr/share/mime/packages/rhwp-mime.xml
+          grep -F '<glob pattern="*.hwpx" weight="100"/>' /usr/share/mime/packages/rhwp-mime.xml
           grep -F '<alias type="application/x-hwpx"/>' /usr/share/mime/packages/rhwp-mime.xml
           desktop-file-validate /usr/share/applications/rhwp.desktop
           sudo update-mime-database /usr/share/mime
-          printf 'Geulbit X HWP MIME check' > /tmp/geulbit-x-mime-check.hwp
-          printf 'Geulbit X HWPX MIME check' > /tmp/geulbit-x-mime-check.hwpx
-          test "$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwp)" = "application/x-hwp"
-          test "$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwpx)" = "application/vnd.hancom.hwpx"
+          grep -F '100:application/x-hwp:*.hwp' /usr/share/mime/globs2
+          grep -F '100:application/vnd.hancom.hwpx:*.hwpx' /usr/share/mime/globs2
+          printf '\320\317\021\340\241\261\032\341' > /tmp/geulbit-x-mime-check.hwp
+          printf 'PK\003\004\024\000\000\000\000\000' > /tmp/geulbit-x-mime-check.hwpx
+          hwp_type="$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwp)"
+          hwpx_type="$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwpx)"
+          echo "HWP MIME: $hwp_type"
+          echo "HWPX MIME: $hwpx_type"
+          test "$hwp_type" = "application/x-hwp"
+          test "$hwpx_type" = "application/vnd.hancom.hwpx"
           rm -f /tmp/geulbit-x-mime-check.hwp /tmp/geulbit-x-mime-check.hwpx
 
       - name: Install WebDriver test dependencies
