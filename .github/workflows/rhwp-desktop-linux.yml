@@ -278,7 +278,7 @@ jobs:
           grep -F '<mime-type type="application/vnd.hancom.hwpx">' /usr/share/mime/packages/rhwp-mime.xml
           grep -F '<alias type="application/x-hwpx"/>' /usr/share/mime/packages/rhwp-mime.xml
           desktop-file-validate /usr/share/applications/rhwp.desktop
-          update-mime-database /usr/share/mime
+          sudo update-mime-database /usr/share/mime
           printf 'Geulbit X HWP MIME check' > /tmp/geulbit-x-mime-check.hwp
           printf 'Geulbit X HWPX MIME check' > /tmp/geulbit-x-mime-check.hwpx
           test "$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwp)" = "application/x-hwp"
