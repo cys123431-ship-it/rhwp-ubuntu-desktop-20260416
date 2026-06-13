@@ -283,8 +283,9 @@ jobs:
           grep -F '100:application/vnd.hancom.hwpx:*.hwpx' /usr/share/mime/globs2
           printf '\320\317\021\340\241\261\032\341' > /tmp/geulbit-x-mime-check.hwp
           printf 'PK\003\004\024\000\000\000\000\000' > /tmp/geulbit-x-mime-check.hwpx
-          hwp_type="$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwp)"
-          hwpx_type="$(xdg-mime query filetype /tmp/geulbit-x-mime-check.hwpx)"
+          # Headless xdg-mime falls back to file(1), which ignores shared MIME globs.
+          hwp_type="$(gio info -a standard::content-type /tmp/geulbit-x-mime-check.hwp | sed -n 's/^  standard::content-type: //p')"
+          hwpx_type="$(gio info -a standard::content-type /tmp/geulbit-x-mime-check.hwpx | sed -n 's/^  standard::content-type: //p')"
           echo "HWP MIME: $hwp_type"
           echo "HWPX MIME: $hwpx_type"
           test "$hwp_type" = "application/x-hwp"
