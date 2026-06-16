@@ -178,7 +178,7 @@ jobs:
           npm run build:linux
 
       - name: Upload Debian package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rhwp-ubuntu-deb
           path: rhwp-desktop/src-tauri/target/**/bundle/deb/*.deb
@@ -186,7 +186,7 @@ jobs:
           retention-days: 30
 
       - name: Upload compatibility reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rhwp-compatibility-reports
           path: compatibility-reports/**
@@ -194,7 +194,7 @@ jobs:
           retention-days: 30
 
       - name: Upload nextest JUnit report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rhwp-nextest-junit
           path: target/nextest/ci/junit.xml
@@ -202,7 +202,7 @@ jobs:
           retention-days: 30
 
       - name: Upload compatibility result baselines
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rhwp-compatibility-baselines
           path: compatibility-corpus/results/**
