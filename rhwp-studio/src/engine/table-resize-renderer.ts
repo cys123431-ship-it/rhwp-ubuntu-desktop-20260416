@@ -122,11 +122,8 @@ export class TableResizeRenderer {
     if (bboxes.length === 0) return;
 
     const { rowLines, colLines } = this.computeBorderLines(bboxes);
-    const scrollContent = this.container.querySelector('#scroll-content');
-    const contentWidth = scrollContent?.clientWidth ?? 0;
     const pageOffset = this.virtualScroll.getPageOffset(edge.pageIndex);
-    const pageDisplayWidth = this.virtualScroll.getPageWidth(edge.pageIndex);
-    const pageLeft = (contentWidth - pageDisplayWidth) / 2;
+    const pageLeft = this.virtualScroll.getPageLeftInContent(edge.pageIndex);
 
     const t = TableResizeRenderer.MARKER_THICKNESS;
     const el = document.createElement('div');
@@ -171,11 +168,8 @@ export class TableResizeRenderer {
     this.ensureAttached();
     if (bboxes.length === 0) return;
 
-    const scrollContent = this.container.querySelector('#scroll-content');
-    const contentWidth = scrollContent?.clientWidth ?? 0;
     const pageOffset = this.virtualScroll.getPageOffset(pageIndex);
-    const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIndex);
-    const pageLeft = (contentWidth - pageDisplayWidth) / 2;
+    const pageLeft = this.virtualScroll.getPageLeftInContent(pageIndex);
 
     const t = TableResizeRenderer.MARKER_THICKNESS;
     const el = document.createElement('div');

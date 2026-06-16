@@ -24,14 +24,10 @@ export class SelectionRenderer {
     this.clear();
     this.ensureAttached();
 
-    const scrollContent = this.container.querySelector('#scroll-content');
-    const contentWidth = scrollContent?.clientWidth ?? 0;
-
     for (const rect of rects) {
       const div = document.createElement('div');
       const pageOffset = this.virtualScroll.getPageOffset(rect.pageIndex);
-      const pageDisplayWidth = this.virtualScroll.getPageWidth(rect.pageIndex);
-      const pageLeft = (contentWidth - pageDisplayWidth) / 2;
+      const pageLeft = this.virtualScroll.getPageLeftInContent(rect.pageIndex);
 
       div.style.cssText =
         `position:absolute;background:rgba(51,144,255,0.35);pointer-events:none;` +

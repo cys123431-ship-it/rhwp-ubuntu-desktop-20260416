@@ -62,17 +62,12 @@ export function startResizeDrag(this: any,
 export function updateResizeDrag(this: any, e: MouseEvent): void {
   if (!this.resizeDragState || !this.tableResizeRenderer) return;
 
-  const zoom = this.viewportManager.getZoom();
-  const scrollContent = this.container.querySelector('#scroll-content');
-  if (!scrollContent) return;
-  const contentX = this.viewportManager.getContentX(e.clientX);
-    const contentY = this.viewportManager.getContentY(e.clientY);
+  const point = this.getPagePointFromClient(e.clientX, e.clientY);
+  if (!point) return;
+  const zoom = point.zoom;
   const pageIdx = this.resizeDragState.edge.pageIndex;
-  const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-  const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-  const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-  const pageX = (contentX - pageLeft) / zoom;
-  const pageY = (contentY - pageOffset) / zoom;
+  const pageX = point.pageX;
+  const pageY = point.pageY;
 
   const newPos = this.resizeDragState.edge.type === 'row' ? pageY : pageX;
 
@@ -95,20 +90,13 @@ export function finishResizeDrag(this: any, e: MouseEvent): void {
   const state = this.resizeDragState;
 
   // mouseup 이벤트 좌표에서 page 좌표 계산
-  const zoom = this.viewportManager.getZoom();
-  const scrollContent = this.container.querySelector('#scroll-content');
-  if (!scrollContent) {
+  const point = this.getPagePointFromClient(e.clientX, e.clientY);
+  if (!point) {
     this.cleanupResizeDrag();
     return;
   }
-  const contentX = this.viewportManager.getContentX(e.clientX);
-    const contentY = this.viewportManager.getContentY(e.clientY);
-  const pageIdx = state.edge.pageIndex;
-  const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-  const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-  const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-  const pageX = (contentX - pageLeft) / zoom;
-  const pageY = (contentY - pageOffset) / zoom;
+  const pageX = point.pageX;
+  const pageY = point.pageY;
 
   const newPos = state.edge.type === 'row' ? pageY : pageX;
   const deltaPagePx = newPos - state.borderOriginalPos;
@@ -383,17 +371,10 @@ export function moveSelectedPicture(this: any, key: 'ArrowUp' | 'ArrowDown' | 'A
 
 export function updateMoveDrag(this: any, e: MouseEvent): void {
   if (!this.moveDragState) return;
-  const zoom = this.viewportManager.getZoom();
-  const sc = this.container.querySelector('#scroll-content');
-  if (!sc) return;
-  const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
-  const pi = this.virtualScroll.getPageAtY(cy);
-  const po = this.virtualScroll.getPageOffset(pi);
-  const pw = this.virtualScroll.getPageWidth(pi);
-  const pl = (this.viewportManager.getContentWidth() - pw) / 2;
-  const px = (cx - pl) / zoom;
-  const py = (cy - po) / zoom;
+  const point = this.getPagePointFromClient(e.clientX, e.clientY);
+  if (!point) return;
+  const px = point.pageX;
+  const py = point.pageY;
 
   // 이전 위치와의 차이를 HWPUNIT으로 변환 (1px = 7200/96 = 75 HWPUNIT)
   const deltaXpx = px - this.moveDragState.lastPageX;
@@ -529,4 +510,3 @@ export function resizeTableProportional(this: any, key: 'ArrowUp' | 'ArrowDown' 
     console.warn('[InputHandler] resizeTableProportional 실패:', err);
   }
 }
-

@@ -156,6 +156,15 @@ export class VirtualScroll {
     return this.pageLefts[pageIdx] ?? -1;
   }
 
+  /** scroll-content 내부 기준 페이지 X 좌표를 반환한다 */
+  getPageLeftInContent(pageIdx: number): number {
+    const pageLeft = this.getPageLeft(pageIdx);
+    if (pageLeft >= 0) return pageLeft;
+
+    const pageWidth = this.getPageWidth(pageIdx);
+    return Math.max(0, (this.totalWidth - pageWidth) / 2);
+  }
+
   getMaxPageWidth(): number {
     return this.maxPageWidth;
   }

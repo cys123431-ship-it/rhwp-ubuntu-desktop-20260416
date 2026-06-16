@@ -1,6 +1,6 @@
 [package]
 name = "rhwp-desktop"
-version = "0.1.22"
+version = "0.1.23"
 description = "Geulbit X desktop shell for HWP and HWPX documents"
 edition = "2021"
 autobins = false

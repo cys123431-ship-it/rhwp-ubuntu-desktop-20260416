@@ -8,6 +8,8 @@
   grid-template-columns: 20px 1fr;
   grid-template-rows: 20px 1fr;
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -39,6 +41,10 @@
   overflow-y: auto;
   overflow-x: auto;
   background: var(--color-hover-bg);
+  min-width: 0;
+  min-height: 0;
+  scrollbar-gutter: stable both-edges;
+  overscroll-behavior: contain;
   user-select: none;
   -webkit-user-select: none;
 }

@@ -7,6 +7,7 @@ function zoomLevel(pct: number): CommandDef {
     id: `view:zoom-${pct}`,
     label: `${pct}%`,
     execute(services) {
+      services.eventBus.emit('view-mode-changed', '사용자 지정');
       services.getViewportManager()?.setZoom(pct / 100);
     },
   };
@@ -20,7 +21,10 @@ export const viewCommands: CommandDef[] = [
     shortcutLabel: 'Shift+Num +',
     execute(services) {
       const vm = services.getViewportManager();
-      if (vm) vm.setZoom(vm.getZoom() + 0.1);
+      if (vm) {
+        services.eventBus.emit('view-mode-changed', '사용자 지정');
+        vm.setZoom(vm.getZoom() + 0.1);
+      }
     },
   },
   {
@@ -30,7 +34,10 @@ export const viewCommands: CommandDef[] = [
     shortcutLabel: 'Shift+Num -',
     execute(services) {
       const vm = services.getViewportManager();
-      if (vm) vm.setZoom(vm.getZoom() - 0.1);
+      if (vm) {
+        services.eventBus.emit('view-mode-changed', '사용자 지정');
+        vm.setZoom(vm.getZoom() - 0.1);
+      }
     },
   },
   {
@@ -44,6 +51,7 @@ export const viewCommands: CommandDef[] = [
       const containerW = container.clientWidth - 40;
       const pi = services.wasm.getPageInfo(0);
       // pi.width/height는 이미 px 단위 (96dpi 기준)
+      services.eventBus.emit('view-mode-changed', '쪽 맞춤');
       vm.setZoom(Math.max(0.1, Math.min(containerW / pi.width, containerH / pi.height, 4.0)));
     },
   },
@@ -57,6 +65,7 @@ export const viewCommands: CommandDef[] = [
       const containerW = container.clientWidth - 40;
       const pi = services.wasm.getPageInfo(0);
       // pi.width는 이미 px 단위 (96dpi 기준)
+      services.eventBus.emit('view-mode-changed', '폭 맞춤');
       vm.setZoom(Math.max(0.1, Math.min(containerW / pi.width, 4.0)));
     },
   },

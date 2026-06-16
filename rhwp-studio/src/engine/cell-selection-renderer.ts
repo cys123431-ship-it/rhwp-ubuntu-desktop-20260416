@@ -29,9 +29,6 @@ export class CellSelectionRenderer {
     this.clear();
     this.ensureAttached();
 
-    const scrollContent = this.container.querySelector('#scroll-content');
-    const contentWidth = scrollContent?.clientWidth ?? 0;
-
     for (const cell of cellBboxes) {
       // 셀이 선택 범위에 포함되는지 확인 (병합 셀 고려)
       const cellEndRow = cell.row + cell.rowSpan - 1;
@@ -46,8 +43,7 @@ export class CellSelectionRenderer {
 
       const div = document.createElement('div');
       const pageOffset = this.virtualScroll.getPageOffset(cell.pageIndex);
-      const pageDisplayWidth = this.virtualScroll.getPageWidth(cell.pageIndex);
-      const pageLeft = (contentWidth - pageDisplayWidth) / 2;
+      const pageLeft = this.virtualScroll.getPageLeftInContent(cell.pageIndex);
 
       div.className = 'cell-selection-highlight';
       div.style.cssText =

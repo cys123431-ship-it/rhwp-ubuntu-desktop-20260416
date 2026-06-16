@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "rhwp",
   "mainBinaryName": "rhwp",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "identifier": "io.rhwp.desktop",
   "build": {
     "beforeBuildCommand": "npm run build:studio",
@@ -16,8 +16,8 @@
         "title": "Geulbit X",
         "width": 1440,
         "height": 980,
-        "minWidth": 960,
-        "minHeight": 720,
+        "minWidth": 760,
+        "minHeight": 540,
         "resizable": true
       }
     ]

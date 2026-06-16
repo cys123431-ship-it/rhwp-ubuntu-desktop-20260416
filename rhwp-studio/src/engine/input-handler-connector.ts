@@ -81,8 +81,7 @@ export function showConnectionPointOverlay(
   if (!sc) return;
   const zoom = this.viewportManager.getZoom();
   const po = this.virtualScroll.getPageOffset(pageIdx);
-  const pw = this.virtualScroll.getPageWidth(pageIdx);
-  const pl = (this.viewportManager.getContentWidth() - pw) / 2;
+  const pl = this.virtualScroll.getPageLeftInContent(pageIdx);
 
   // 마우스 근처 개체 찾기 (bbox 내부)
   for (const ctrl of layout.controls) {
@@ -148,8 +147,7 @@ export function updateConnectorPreview(
   if (!sc) return;
   const zoom = this.viewportManager.getZoom();
   const po = this.virtualScroll.getPageOffset(pageIdx);
-  const pw = this.virtualScroll.getPageWidth(pageIdx);
-  const pl = (this.viewportManager.getContentWidth() - pw) / 2;
+  const pl = this.virtualScroll.getPageLeftInContent(pageIdx);
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'connector-preview');

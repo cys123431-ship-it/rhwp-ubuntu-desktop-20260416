@@ -11,22 +11,44 @@ async function getClientPointForOffset(page, offset) {
     const wasm = window.__wasm;
     const canvasView = window.__canvasView;
     const container = document.querySelector('#scroll-container');
-    if (!wasm || !canvasView || !container) return null;
+    const scrollContent = document.querySelector('#scroll-content');
+    if (!wasm || !canvasView || !container || !scrollContent) return null;
 
     const cursorRect = wasm.getCursorRect(0, 0, charOffset);
     const virtualScroll = canvasView.getVirtualScroll();
     const viewport = canvasView.getViewportManager();
     const zoom = viewport.getZoom();
-    const containerRect = container.getBoundingClientRect();
-    const contentX = virtualScroll.getPageLeft(cursorRect.pageIndex) + cursorRect.x * zoom;
+    const scrollContentRect = scrollContent.getBoundingClientRect();
+    const pageLeft = typeof virtualScroll.getPageLeftInContent === 'function'
+      ? virtualScroll.getPageLeftInContent(cursorRect.pageIndex)
+      : Math.max(0, (scrollContent.clientWidth - virtualScroll.getPageWidth(cursorRect.pageIndex)) / 2);
+    const contentX = pageLeft + cursorRect.x * zoom;
     const contentY = virtualScroll.getPageOffset(cursorRect.pageIndex)
       + (cursorRect.y + cursorRect.height / 2) * zoom;
 
     return {
-      x: containerRect.left + contentX - container.scrollLeft,
-      y: containerRect.top + contentY - container.scrollTop,
+      x: scrollContentRect.left + contentX,
+      y: scrollContentRect.top + contentY,
     };
   }, offset);
+}
+
+async function getEditorGeometry(page) {
+  return await page.evaluate(() => {
+    const container = document.querySelector('#scroll-container');
+    const scrollContent = document.querySelector('#scroll-content');
+    const statusBar = document.querySelector('#status-bar');
+    if (!container || !scrollContent || !statusBar) return null;
+    const containerRect = container.getBoundingClientRect();
+    const contentRect = scrollContent.getBoundingClientRect();
+    const statusRect = statusBar.getBoundingClientRect();
+    return {
+      centeredOffsetX: contentRect.left - containerRect.left + container.scrollLeft,
+      scrollableY: container.scrollHeight > container.clientHeight,
+      statusHeight: statusRect.height,
+      statusText: statusBar.textContent ?? '',
+    };
+  });
 }
 
 async function getSelection(page) {
@@ -53,6 +75,15 @@ runTest('mouse drag selection works in both vertical directions', async ({ page 
   const chunk = '가나다라마바사아자차카타파하 한글 블록 선택 검증 ';
   const text = Array.from({ length: 16 }, () => chunk).join('');
   await typeText(page, text);
+
+  const geometry = await getEditorGeometry(page);
+  assert(Boolean(geometry), 'editor geometry is available');
+  assert(
+    geometry.centeredOffsetX > 40,
+    `document is centered inside the viewport (offset=${geometry.centeredOffsetX})`,
+  );
+  assert(geometry.statusHeight >= 24, `status bar is visible (height=${geometry.statusHeight})`);
+  assert(/보기:/.test(geometry.statusText), 'status bar shows view mode');
 
   const length = await page.evaluate(() => window.__wasm?.getParagraphLength?.(0, 0) ?? 0);
   const startOffset = 0;

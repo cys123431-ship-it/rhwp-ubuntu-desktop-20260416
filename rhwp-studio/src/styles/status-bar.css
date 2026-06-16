@@ -4,7 +4,7 @@
 #status-bar {
   display: flex;
   align-items: center;
-  height: 22px;
+  height: 26px;
   padding: 0 10px;
   background: var(--color-surface-raised);
   border-top: 1px solid #b4b4b4;
@@ -17,11 +17,15 @@
 
 /* 좌측 항목 — 한컴 .status_bar .inline_panel */
 .stb-item {
-  line-height: 22px;
+  line-height: 24px;
   white-space: nowrap;
   flex-shrink: 0;
   flex-basis: auto;
   flex-wrap: nowrap;
+}
+
+.stb-view-mode {
+  color: var(--color-text-secondary);
 }
 
 /* 세로 구분선 — 한컴 .vertical_line_wrap .col_line */
@@ -46,12 +50,13 @@
 /* 상태 메시지 — 한컴 .status_bar .message */
 .stb-message {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #4c73d5;
   padding: 0 12px;
-  line-height: 22px;
+  line-height: 24px;
 }
 
 /* 우측 줌 영역 — 한컴 .inline_panel.justify_right.align_item_center */
@@ -85,6 +90,11 @@
 .stb-icon-btn:hover {
   background: rgba(0, 0, 0, 0.08);
   border-color: #b4b4b4;
+}
+
+.stb-icon-btn.active {
+  background: var(--color-selected-bg);
+  border-color: var(--color-focus-border);
 }
 
 /* 줌 값 표시 — 한컴 .btn_dropdown (height:20px) */

@@ -157,7 +157,27 @@ const sbMessage = () => document.getElementById('sb-message')!;
 const sbPage = () => document.getElementById('sb-page')!;
 const sbSection = () => document.getElementById('sb-section')!;
 const sbZoomVal = () => document.getElementById('sb-zoom-val')!;
+const sbMode = () => document.getElementById('sb-mode')!;
+const sbViewMode = () => document.getElementById('sb-view-mode')!;
 const sessionBanner = () => document.getElementById('session-banner')!;
+
+type ViewModeLabel = '사용자 지정' | '폭 맞춤' | '쪽 맞춤';
+let currentViewMode: ViewModeLabel = '사용자 지정';
+let currentInsertMode = true;
+
+function updateEditModeStatus(): void {
+  const mode = documentSession.current.isProtected
+    ? '보호 보기'
+    : `편집 가능 · ${currentInsertMode ? '삽입' : '수정'}`;
+  sbMode().textContent = mode;
+}
+
+function updateViewModeStatus(mode: ViewModeLabel): void {
+  currentViewMode = mode;
+  sbViewMode().textContent = `보기: ${mode}`;
+  document.getElementById('sb-zoom-fit-width')?.classList.toggle('active', mode === '폭 맞춤');
+  document.getElementById('sb-zoom-fit')?.classList.toggle('active', mode === '쪽 맞춤');
+}
 
 function toUint8Array(bytes: Uint8Array | number[]): Uint8Array {
   return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -1030,9 +1050,11 @@ function setupZoomControls(): void {
   const vm = canvasView.getViewportManager();
 
   document.getElementById('sb-zoom-in')!.addEventListener('click', () => {
+    updateViewModeStatus('사용자 지정');
     vm.setZoom(vm.getZoom() + 0.1);
   });
   document.getElementById('sb-zoom-out')!.addEventListener('click', () => {
+    updateViewModeStatus('사용자 지정');
     vm.setZoom(vm.getZoom() - 0.1);
   });
 
@@ -1045,6 +1067,7 @@ function setupZoomControls(): void {
     // pageInfo.width는 이미 px 단위 (96dpi 기준)
     const zoom = containerWidth / pageInfo.width;
     console.log(`[zoom-fit-width] container=${containerWidth} page=${pageInfo.width} zoom=${zoom.toFixed(3)}`);
+    updateViewModeStatus('폭 맞춤');
     vm.setZoom(Math.max(0.1, Math.min(zoom, 4.0)));
   });
 
@@ -1059,6 +1082,7 @@ function setupZoomControls(): void {
     const zoomW = containerWidth / pageInfo.width;
     const zoomH = containerHeight / pageInfo.height;
     console.log(`[zoom-fit-page] containerW=${containerWidth} containerH=${containerHeight} pageW=${pageInfo.width} pageH=${pageInfo.height} zoomW=${zoomW.toFixed(3)} zoomH=${zoomH.toFixed(3)}`);
+    updateViewModeStatus('쪽 맞춤');
     vm.setZoom(Math.max(0.1, Math.min(zoomW, zoomH, 4.0)));
   });
 
@@ -1070,6 +1094,7 @@ function setupZoomControls(): void {
       document.getElementById('sb-zoom-fit')!.click();
     } else {
       // 현재 쪽 맞춤/기타 → 100%로 전환
+      updateViewModeStatus('사용자 지정');
       vm.setZoom(1.0);
     }
   });
@@ -1078,12 +1103,15 @@ function setupZoomControls(): void {
     if (!e.ctrlKey && !e.metaKey) return;
     if (e.key === '=' || e.key === '+') {
       e.preventDefault();
+      updateViewModeStatus('사용자 지정');
       vm.setZoom(vm.getZoom() + 0.1);
     } else if (e.key === '-') {
       e.preventDefault();
+      updateViewModeStatus('사용자 지정');
       vm.setZoom(vm.getZoom() - 0.1);
     } else if (e.key === '0') {
       e.preventDefault();
+      updateViewModeStatus('사용자 지정');
       vm.setZoom(1.0);
     }
   });
@@ -1116,11 +1144,17 @@ function setupEventListeners(): void {
 
   eventBus.on('zoom-level-display', (zoom) => {
     sbZoomVal().textContent = `${Math.round((zoom as number) * 100)}%`;
+    sbViewMode().textContent = `보기: ${currentViewMode}`;
+  });
+
+  eventBus.on('view-mode-changed', (mode) => {
+    updateViewModeStatus(mode as ViewModeLabel);
   });
 
   // 삽입/수정 모드 토글
   eventBus.on('insert-mode-changed', (insertMode) => {
-    document.getElementById('sb-mode')!.textContent = (insertMode as boolean) ? '삽입' : '수정';
+    currentInsertMode = insertMode as boolean;
+    updateEditModeStatus();
   });
 
   // 필드 정보 표시
@@ -1204,6 +1238,8 @@ async function initializeDocument(
     msg.textContent = displayName;
     totalSections = docInfo.sectionCount ?? 1;
     sbSection().textContent = `구역: 1 / ${totalSections}`;
+    updateEditModeStatus();
+    updateViewModeStatus(currentViewMode);
     console.log('[initDoc] 3. inputHandler deactivate');
     inputHandler?.deactivate();
     console.log('[initDoc] 4. canvasView loadDocument');

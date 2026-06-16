@@ -546,9 +546,6 @@ export class InputHandler {
 
     // 화면 좌표 → 종이 좌표 (HWPUNIT)
     const zoom = this.viewportManager.getZoom();
-    const scrollContent = this.container.querySelector('#scroll-content');
-    const contentWidth = this.viewportManager.getContentWidth();
-    if (!contentWidth) { this.cancelPolygonDrawing(); return; }
 
     // bbox 계산
     const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
@@ -562,14 +559,10 @@ export class InputHandler {
     // 종이 좌표로 오프셋 계산
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
-    const cX = this.viewportManager.getContentX(centerX);
-    const cY = this.viewportManager.getContentY(centerY);
-    const pageIdx = this.virtualScroll.getPageAtY(cY);
-    const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-    const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-    const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-    const paperX = ((cX - pageLeft) / zoom) * 75;
-    const paperY = ((cY - pageOffset) / zoom) * 75;
+    const centerPoint = this.getPagePointFromClient(centerX, centerY);
+    if (!centerPoint) { this.cancelPolygonDrawing(); return; }
+    const paperX = centerPoint.pageX * 75;
+    const paperY = centerPoint.pageY * 75;
     const horzOffset = Math.max(0, Math.round(paperX - wHwp / 2));
     const vertOffset = Math.max(0, Math.round(paperY - hHwp / 2));
 
@@ -774,17 +767,11 @@ export class InputHandler {
       const centerX = (drag.startClientX + drag.currentClientX) / 2;
       const centerY = (drag.startClientY + drag.currentClientY) / 2;
       // 화면 좌표 → 종이 좌표 (px, 줌 보정 전)
-      const scrollContent = this.container.querySelector('#scroll-content');
-      if (scrollContent) {
-        const cX = this.viewportManager.getContentX(centerX);
-        const cY = this.viewportManager.getContentY(centerY);
-        const pageIdx = this.virtualScroll.getPageAtY(cY);
-        const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-        const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-        const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
+      const centerPoint = this.getPagePointFromClient(centerX, centerY);
+      if (centerPoint) {
         // 종이 좌표 (px → HWPUNIT)
-        const paperX = ((cX - pageLeft) / zoom) * 75;
-        const paperY = ((cY - pageOffset) / zoom) * 75;
+        const paperX = centerPoint.pageX * 75;
+        const paperY = centerPoint.pageY * 75;
         // 도형 좌상단 = 중심점 - 반폭/반높이
         horzOffset = Math.max(0, Math.round(paperX - wHwp / 2));
         vertOffset = Math.max(0, Math.round(paperY - hHwp / 2));
@@ -885,31 +872,75 @@ export class InputHandler {
     }
   }
 
-  private hitTestFromClientPoint(
+  public getScrollContentPointFromClient(
     clientX: number,
     clientY: number,
     clampToViewport = false,
-  ): DocumentPosition | null {
-    const zoom = this.viewportManager.getZoom();
-    const scrollContent = this.container.querySelector('#scroll-content');
+  ): { x: number; y: number } | null {
+    const scrollContent = this.container.querySelector('#scroll-content') as HTMLElement | null;
     if (!scrollContent) return null;
-    const rect = this.container.getBoundingClientRect();
+
+    const rect = this.viewportManager.getContainerRect();
     let x = clientX;
     let y = clientY;
     if (clampToViewport) {
       x = Math.min(rect.right - 1, Math.max(rect.left + 1, x));
       y = Math.min(rect.bottom - 1, Math.max(rect.top + 1, y));
     }
-    const contentX = (x - rect.left) + this.container.scrollLeft;
-    const contentY = (y - rect.top) + this.container.scrollTop;
-    const pageIdx = this.virtualScroll.getPageAtY(contentY);
+
+    const contentRect = scrollContent.getBoundingClientRect();
+    const scrollContentOffsetX = (contentRect.left - rect.left) + this.container.scrollLeft;
+    const scrollContentOffsetY = (contentRect.top - rect.top) + this.container.scrollTop;
+
+    return {
+      x: this.viewportManager.getContentX(x) - scrollContentOffsetX,
+      y: this.viewportManager.getContentY(y) - scrollContentOffsetY,
+    };
+  }
+
+  public getPagePointFromClient(
+    clientX: number,
+    clientY: number,
+    clampToViewport = false,
+  ): {
+    pageIdx: number;
+    pageX: number;
+    pageY: number;
+    contentX: number;
+    contentY: number;
+    pageLeft: number;
+    pageOffset: number;
+    zoom: number;
+  } | null {
+    const point = this.getScrollContentPointFromClient(clientX, clientY, clampToViewport);
+    if (!point) return null;
+
+    const zoom = this.viewportManager.getZoom();
+    const pageIdx = this.virtualScroll.getPageAtY(point.y);
     const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-    const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-    const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-    const pageX = (contentX - pageLeft) / zoom;
-    const pageY = (contentY - pageOffset) / zoom;
+    const pageLeft = this.virtualScroll.getPageLeftInContent(pageIdx);
+
+    return {
+      pageIdx,
+      pageX: (point.x - pageLeft) / zoom,
+      pageY: (point.y - pageOffset) / zoom,
+      contentX: point.x,
+      contentY: point.y,
+      pageLeft,
+      pageOffset,
+      zoom,
+    };
+  }
+
+  private hitTestFromClientPoint(
+    clientX: number,
+    clientY: number,
+    clampToViewport = false,
+  ): DocumentPosition | null {
+    const point = this.getPagePointFromClient(clientX, clientY, clampToViewport);
+    if (!point) return null;
     try {
-      return this.wasm.hitTest(pageIdx, pageX, pageY);
+      return this.wasm.hitTest(point.pageIdx, point.pageX, point.pageY);
     } catch {
       return null;
     }
@@ -1520,18 +1551,10 @@ export class InputHandler {
   private hitTestCellRowCol(e: MouseEvent): { row: number; col: number } | null {
     const ctx = this.cursor.getCellTableContext();
     if (!ctx) return null;
-    const zoom = this.viewportManager.getZoom();
-    const scrollContent = this.container.querySelector('#scroll-content')!;
-    const contentX = this.viewportManager.getContentX(e.clientX);
-    const contentY = this.viewportManager.getContentY(e.clientY);
-    const pageIdx = this.virtualScroll.getPageAtY(contentY);
-    const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-    const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-    const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-    const pageX = (contentX - pageLeft) / zoom;
-    const pageY = (contentY - pageOffset) / zoom;
+    const point = this.getPagePointFromClient(e.clientX, e.clientY);
+    if (!point) return null;
     try {
-      const hit = this.wasm.hitTest(pageIdx, pageX, pageY);
+      const hit = this.wasm.hitTest(point.pageIdx, point.pageX, point.pageY);
       // 같은 표인지 확인
       if (hit.parentParaIndex !== ctx.ppi || hit.controlIndex !== ctx.ci) return null;
       if (hit.cellIndex === undefined) return null;
@@ -2818,12 +2841,7 @@ export class InputHandler {
   private formBboxToOverlayRect(bbox: { x: number; y: number; w: number; h: number }, pageIdx: number): { left: number; top: number; width: number; height: number } {
     const zoom = this.viewportManager.getZoom();
     const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-    const scrollContent = this.container.querySelector('#scroll-content');
-    const contentWidth = this.viewportManager.getContentWidth();
-    const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-    const pageLeft = this.virtualScroll.getPageLeft(pageIdx) >= 0
-      ? this.virtualScroll.getPageLeft(pageIdx)
-      : (contentWidth - pageDisplayWidth) / 2;
+    const pageLeft = this.virtualScroll.getPageLeftInContent(pageIdx);
 
     return {
       left: pageLeft + bbox.x * zoom,

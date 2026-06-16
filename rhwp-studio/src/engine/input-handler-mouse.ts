@@ -71,17 +71,9 @@ export function onClick(this: any, e: MouseEvent): void {
     if (target.closest('#menu-bar') || target.closest('#icon-toolbar') || target.closest('#style-bar')) return;
     e.preventDefault();
 
-    const sc = this.container.querySelector('#scroll-content');
-    if (!sc) return;
-    const zoom = this.viewportManager.getZoom();
-    const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
-    const pi = this.virtualScroll.getPageAtY(cy);
-    const po = this.virtualScroll.getPageOffset(pi);
-    const pw = this.virtualScroll.getPageWidth(pi);
-    const pl = (this.viewportManager.getContentWidth() - pw) / 2;
-    const pageX = (cx - pl) / zoom;
-    const pageY = (cy - po) / zoom;
+    const point = this.getPagePointFromClient(e.clientX, e.clientY);
+    if (!point) return;
+    const { pageIdx: pi, pageX, pageY } = point;
 
     const cp = _connector.findNearestConnectionPoint.call(this, pi, pageX, pageY, 15,
       this.connectorStartRef ? { sec: this.connectorStartRef.sec, ppi: this.connectorStartRef.ppi, ci: this.connectorStartRef.ci } : undefined);
@@ -177,17 +169,10 @@ export function onClick(this: any, e: MouseEvent): void {
     // 좌클릭이 표 내부이면 → 이동 드래그 시작
     const ref = this.cursor.getSelectedTableRef();
     if (ref && e.button === 0) {
-      const zoom = this.viewportManager.getZoom();
-      const sc = this.container.querySelector('#scroll-content');
-      if (sc) {
-        const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
-        const pi = this.virtualScroll.getPageAtY(cy);
-        const po = this.virtualScroll.getPageOffset(pi);
-        const pw = this.virtualScroll.getPageWidth(pi);
-        const pl = (this.viewportManager.getContentWidth() - pw) / 2;
-        const px = (cx - pl) / zoom;
-        const py = (cy - po) / zoom;
+      const point = this.getPagePointFromClient(e.clientX, e.clientY);
+      if (point) {
+        const px = point.pageX;
+        const py = point.pageY;
         try {
           const bbox = this.wasm.getTableBBox(ref.sec, ref.ppi, ref.ci);
           if (px >= bbox.x && px <= bbox.x + bbox.width &&
@@ -223,17 +208,13 @@ export function onClick(this: any, e: MouseEvent): void {
     // 다중 선택 상태: 핸들 리사이즈 + BBOX 내부 이동 드래그
     if (this.cursor.isMultiPictureSelection()) {
       if (e.button === 0 && !e.shiftKey) {
-        const sc = this.container.querySelector('#scroll-content');
-        if (sc) {
-          const zoom = this.viewportManager.getZoom();
-          const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
-          const pi = this.virtualScroll.getPageAtY(cy);
-          const po = this.virtualScroll.getPageOffset(pi);
-          const pw = this.virtualScroll.getPageWidth(pi);
-          const pl = (this.viewportManager.getContentWidth() - pw) / 2;
-          const px = (cx - pl) / zoom;
-          const py = (cy - po) / zoom;
+        const point = this.getPagePointFromClient(e.clientX, e.clientY);
+        if (point) {
+          const pi = point.pageIdx;
+          const px = point.pageX;
+          const py = point.pageY;
+          const cx = point.contentX;
+          const cy = point.contentY;
           // 합산 BBOX 계산
           const refs = this.cursor.getSelectedPictureRefs();
           let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -317,10 +298,10 @@ export function onClick(this: any, e: MouseEvent): void {
     // 핸들 드래그 리사이즈 / 회전 시작 감지 (수식은 이동/리사이즈/회전 미지원)
     const selRef = this.cursor.getSelectedPictureRef();
     if (e.button === 0 && this.pictureObjectRenderer && selRef?.type !== 'equation') {
-      const sc = this.container.querySelector('#scroll-content');
-      if (sc) {
-        const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
+      const point = this.getPagePointFromClient(e.clientX, e.clientY);
+      if (point) {
+        const cx = point.contentX;
+        const cy = point.contentY;
         const dir = this.pictureObjectRenderer.getHandleAtPoint(cx, cy);
         if (dir) {
           e.preventDefault();
@@ -332,8 +313,7 @@ export function onClick(this: any, e: MouseEvent): void {
               if (ref.type === 'line' && (dir === 'sw' || dir === 'ne')) {
                 const zoom = this.viewportManager.getZoom();
                 const po = this.virtualScroll.getPageOffset(picBbox.pageIndex);
-                const pw = this.virtualScroll.getPageWidth(picBbox.pageIndex);
-                const pl = (this.viewportManager.getContentWidth() - pw) / 2;
+                const pl = this.virtualScroll.getPageLeftInContent(picBbox.pageIndex);
                 this.isLineEndpointDragging = true;
                 this.lineEndpointState = {
                   ref: { sec: ref.sec, ppi: ref.ppi, ci: ref.ci, type: ref.type },
@@ -349,8 +329,7 @@ export function onClick(this: any, e: MouseEvent): void {
                 // 회전 드래그 시작
                 const zoom = this.viewportManager.getZoom();
                 const po = this.virtualScroll.getPageOffset(picBbox.pageIndex);
-                const pw = this.virtualScroll.getPageWidth(picBbox.pageIndex);
-                const pl = (this.viewportManager.getContentWidth() - pw) / 2;
+                const pl = this.virtualScroll.getPageLeftInContent(picBbox.pageIndex);
                 // 도형 중심 (scroll-content 좌표)
                 const objCx = pl + (picBbox.x + picBbox.w / 2) * zoom;
                 const objCy = po + (picBbox.y + picBbox.h / 2) * zoom;
@@ -399,17 +378,11 @@ export function onClick(this: any, e: MouseEvent): void {
       if (ref && ref.type !== 'equation') {
         const picBbox = this.findPictureBbox(ref);
         if (picBbox) {
-          const sc = this.container.querySelector('#scroll-content');
-          if (sc) {
-            const zoom = this.viewportManager.getZoom();
-            const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
-            const pi = this.virtualScroll.getPageAtY(cy);
-            const po = this.virtualScroll.getPageOffset(pi);
-            const pw = this.virtualScroll.getPageWidth(pi);
-            const pl = (this.viewportManager.getContentWidth() - pw) / 2;
-            const px = (cx - pl) / zoom;
-            const py = (cy - po) / zoom;
+          const point = this.getPagePointFromClient(e.clientX, e.clientY);
+          if (point) {
+            const pi = point.pageIdx;
+            const px = point.pageX;
+            const py = point.pageY;
             if (!e.shiftKey && pi === picBbox.pageIndex &&
                 px >= picBbox.x && px <= picBbox.x + picBbox.w &&
                 py >= picBbox.y && py <= picBbox.y + picBbox.h) {
@@ -472,17 +445,11 @@ export function onClick(this: any, e: MouseEvent): void {
           const bboxes = this.wasm.getTableCellBboxes(ctx.sec, ctx.ppi, ctx.ci);
           this.cachedTableRef = { sec: ctx.sec, ppi: ctx.ppi, ci: ctx.ci };
           this.cachedCellBboxes = bboxes;
-          const zoom = this.viewportManager.getZoom();
-          const scrollContent = this.container.querySelector('#scroll-content');
-          if (scrollContent) {
-            const contentX = this.viewportManager.getContentX(e.clientX);
-  const contentY = this.viewportManager.getContentY(e.clientY);
-            const pageIdx = this.virtualScroll.getPageAtY(contentY);
-            const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-            const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-            const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-            const pageX = (contentX - pageLeft) / zoom;
-            const pageY = (contentY - pageOffset) / zoom;
+          const point = this.getPagePointFromClient(e.clientX, e.clientY);
+          if (point) {
+            const pageIdx = point.pageIdx;
+            const pageX = point.pageX;
+            const pageY = point.pageY;
             const pageBboxes = bboxes.filter((b: any) => b.pageIndex === pageIdx);
             const edge = this.tableResizeRenderer.hitTestBorder(pageX, pageY, pageBboxes);
             if (edge) {
@@ -510,23 +477,9 @@ export function onClick(this: any, e: MouseEvent): void {
   // 브라우저 기본 포커스 동작을 방지하여 textarea 포커스 유지
   e.preventDefault();
 
-  const zoom = this.viewportManager.getZoom();
-  const scrollContent = this.container.querySelector('#scroll-content')!;
-  // 클릭 좌표 → scroll-content 내 좌표 (캐싱된 ViewportManager 좌표계 사용)
-  const contentX = this.viewportManager.getContentX(e.clientX);
-  const contentY = this.viewportManager.getContentY(e.clientY);
-
-  // 페이지 찾기
-  const pageIdx = this.virtualScroll.getPageAtY(contentY);
-  const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-
-  // CSS 중앙 정렬 보정 (left:50%; transform:translateX(-50%))
-  const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-  const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-
-  // 페이지 내 좌표 (줌 역산)
-  const pageX = (contentX - pageLeft) / zoom;
-  const pageY = (contentY - pageOffset) / zoom;
+  const point = this.getPagePointFromClient(e.clientX, e.clientY);
+  if (!point) return;
+  const { pageIdx, pageX, pageY, zoom } = point;
 
   // 표 경계선 클릭 → 리사이즈 드래그 시작
   if (e.button === 0 && this.tableResizeRenderer && this.cachedCellBboxes && this.cachedTableRef) {
@@ -812,19 +765,11 @@ export function onDblClick(this: any, e: MouseEvent): void {
   // 머리말/꼬리말 영역 더블클릭 → 편집 모드 진입
   if (!this.cursor.isInHeaderFooter()) {
     try {
-      const zoom = this.viewportManager.getZoom();
-      const sc = this.container.querySelector('#scroll-content');
-      if (sc) {
-        const contentX = this.viewportManager.getContentX(e.clientX);
-        const contentY = this.viewportManager.getContentY(e.clientY);
-        const pageIdx = this.virtualScroll.getPageAtY(contentY);
+      const point = this.getPagePointFromClient(e.clientX, e.clientY);
+      if (point) {
+        const pageIdx = point.pageIdx;
         if (pageIdx >= 0) {
-          const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-          const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-          const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-          const pageX = (contentX - pageLeft) / zoom;
-          const pageY = (contentY - pageOffset) / zoom;
-          const hfHit = this.wasm.hitTestHeaderFooter(pageIdx, pageX, pageY);
+          const hfHit = this.wasm.hitTestHeaderFooter(pageIdx, point.pageX, point.pageY);
           if (hfHit.hit) {
             e.preventDefault();
             const sectionIdx = hfHit.sectionIndex ?? 0;
@@ -891,16 +836,11 @@ export function onContextMenu(this: any, e: MouseEvent): void {
   }
 
   // 클릭 좌표 → hitTest로 표 셀 내부/외부 판별
-  const zoom = this.viewportManager.getZoom();
-  const scrollContent = this.container.querySelector('#scroll-content')!;
-  const contentX = this.viewportManager.getContentX(e.clientX);
-  const contentY = this.viewportManager.getContentY(e.clientY);
-  const pageIdx = this.virtualScroll.getPageAtY(contentY);
-  const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-  const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-  const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-  const pageX = (contentX - pageLeft) / zoom;
-  const pageY = (contentY - pageOffset) / zoom;
+  const point = this.getPagePointFromClient(e.clientX, e.clientY);
+  if (!point) return;
+  const pageIdx = point.pageIdx;
+  const pageX = point.pageX;
+  const pageY = point.pageY;
 
   let inTable = false;
   try {
@@ -931,17 +871,11 @@ export function onContextMenu(this: any, e: MouseEvent): void {
 export function onMouseMove(this: any, e: MouseEvent): void {
   // 연결선 드로잉 모드: 연결점 오버레이 + 프리뷰
   if (this.connectorDrawingMode) {
-    const sc = this.container.querySelector('#scroll-content');
-    if (sc) {
-      const zoom = this.viewportManager.getZoom();
-      const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
-      const pi = this.virtualScroll.getPageAtY(cy);
-      const po = this.virtualScroll.getPageOffset(pi);
-      const pw = this.virtualScroll.getPageWidth(pi);
-      const pl = (this.viewportManager.getContentWidth() - pw) / 2;
-      const pageX = (cx - pl) / zoom;
-      const pageY = (cy - po) / zoom;
+    const point = this.getPagePointFromClient(e.clientX, e.clientY);
+    if (point) {
+      const pi = point.pageIdx;
+      const pageX = point.pageX;
+      const pageY = point.pageY;
       _connector.showConnectionPointOverlay.call(this, pi, pageX, pageY);
       if (this.connectorStartRef) {
         _connector.updateConnectorPreview.call(this,
@@ -997,10 +931,10 @@ export function onMouseMove(this: any, e: MouseEvent): void {
       this.dragRafId = 0;
       if (!this.isLineEndpointDragging || !this.lineEndpointState) return;
       const st = this.lineEndpointState;
-      const sc = this.container.querySelector('#scroll-content');
-      if (!sc) return;
-      const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
+      const point = this.getScrollContentPointFromClient(e.clientX, e.clientY);
+      if (!point) return;
+      const cx = point.x;
+      const cy = point.y;
       const px = (cx - st.pageLeft) / st.zoom;
       const py = (cy - st.pageOffset) / st.zoom;
       // page px → HWPUNIT
@@ -1117,10 +1051,10 @@ export function onMouseMove(this: any, e: MouseEvent): void {
 
   // 그림 객체 선택 중 → 핸들 커서 변경
   if (this.cursor.isInPictureObjectSelection() && this.pictureObjectRenderer) {
-    const scrollContent = this.container.querySelector('#scroll-content');
-    if (!scrollContent) return;
-    const x = this.viewportManager.getContentX(e.clientX);
-    const y = this.viewportManager.getContentY(e.clientY);
+    const point = this.getScrollContentPointFromClient(e.clientX, e.clientY);
+    if (!point) return;
+    const x = point.x;
+    const y = point.y;
     const dir = this.pictureObjectRenderer.getHandleAtPoint(x, y);
     if (dir) {
       const cursorMap: Record<string, string> = {
@@ -1137,16 +1071,10 @@ export function onMouseMove(this: any, e: MouseEvent): void {
       if (ref) {
         const picBbox = this.findPictureBbox(ref);
         if (picBbox) {
-          const zoom = this.viewportManager.getZoom();
-          const pi = this.virtualScroll.getPageAtY(y);
-          const po = this.virtualScroll.getPageOffset(pi);
-          const pw = this.virtualScroll.getPageWidth(pi);
-          const pl = (scrollContent.clientWidth - pw) / 2;
-          const px = (x - pl) / zoom;
-          const py = (y - po) / zoom;
-          if (pi === picBbox.pageIndex &&
-              px >= picBbox.x && px <= picBbox.x + picBbox.w &&
-              py >= picBbox.y && py <= picBbox.y + picBbox.h) {
+          const pagePoint = this.getPagePointFromClient(e.clientX, e.clientY);
+          if (pagePoint && pagePoint.pageIdx === picBbox.pageIndex &&
+              pagePoint.pageX >= picBbox.x && pagePoint.pageX <= picBbox.x + picBbox.w &&
+              pagePoint.pageY >= picBbox.y && pagePoint.pageY <= picBbox.y + picBbox.h) {
             try {
               const props = this.getObjectProperties(ref);
               this.container.style.cursor = props.treatAsChar ? '' : 'move';
@@ -1168,10 +1096,10 @@ export function onMouseMove(this: any, e: MouseEvent): void {
 
   // 표 객체 선택 중 → 핸들 커서 변경
   if (this.cursor.isInTableObjectSelection() && this.tableObjectRenderer) {
-    const scrollContent = this.container.querySelector('#scroll-content');
-    if (!scrollContent) return;
-    const x = this.viewportManager.getContentX(e.clientX);
-    const y = this.viewportManager.getContentY(e.clientY);
+    const point = this.getScrollContentPointFromClient(e.clientX, e.clientY);
+    if (!point) return;
+    const x = point.x;
+    const y = point.y;
 
     const dir = this.tableObjectRenderer.getHandleAtPoint(x, y);
     if (dir) {
@@ -1185,18 +1113,12 @@ export function onMouseMove(this: any, e: MouseEvent): void {
     } else {
       // 핸들 밖이면 표 내부인지 확인 → move 커서
       const ref = this.cursor.getSelectedTableRef();
-      if (ref) {
-        const zoom = this.viewportManager.getZoom();
-        const pi = this.virtualScroll.getPageAtY(y);
-        const po = this.virtualScroll.getPageOffset(pi);
-        const pw = this.virtualScroll.getPageWidth(pi);
-        const pl = (scrollContent.clientWidth - pw) / 2;
-        const px = (x - pl) / zoom;
-        const py = (y - po) / zoom;
+      const pagePoint = this.getPagePointFromClient(e.clientX, e.clientY);
+      if (ref && pagePoint) {
         try {
           const bbox = this.wasm.getTableBBox(ref.sec, ref.ppi, ref.ci);
-          if (px >= bbox.x && px <= bbox.x + bbox.width &&
-              py >= bbox.y && py <= bbox.y + bbox.height) {
+          if (pagePoint.pageX >= bbox.x && pagePoint.pageX <= bbox.x + bbox.width &&
+              pagePoint.pageY >= bbox.y && pagePoint.pageY <= bbox.y + bbox.height) {
             this.container.style.cursor = 'move';
           } else {
             this.container.style.cursor = '';
@@ -1228,17 +1150,11 @@ export function onMouseMove(this: any, e: MouseEvent): void {
 export function handleResizeHover(this: any, e: MouseEvent): void {
   if (!this.tableResizeRenderer) return;
 
-  const zoom = this.viewportManager.getZoom();
-  const scrollContent = this.container.querySelector('#scroll-content');
-  if (!scrollContent) return;
-  const contentX = this.viewportManager.getContentX(e.clientX);
-  const contentY = this.viewportManager.getContentY(e.clientY);
-  const pageIdx = this.virtualScroll.getPageAtY(contentY);
-  const pageOffset = this.virtualScroll.getPageOffset(pageIdx);
-  const pageDisplayWidth = this.virtualScroll.getPageWidth(pageIdx);
-  const pageLeft = (this.viewportManager.getContentWidth() - pageDisplayWidth) / 2;
-  const pageX = (contentX - pageLeft) / zoom;
-  const pageY = (contentY - pageOffset) / zoom;
+  const point = this.getPagePointFromClient(e.clientX, e.clientY);
+  if (!point) return;
+  const pageIdx = point.pageIdx;
+  const pageX = point.pageX;
+  const pageY = point.pageY;
 
   // hitTest로 표 셀 위인지 확인
   let tableRef: { sec: number; ppi: number; ci: number } | null = null;
@@ -1253,54 +1169,32 @@ export function handleResizeHover(this: any, e: MouseEvent): void {
     this.tableResizeRenderer.clear();
     this.cachedTableRef = null;
     this.cachedCellBboxes = null;
-    // 개체(도형/연결선) hover 감지: 커서 변경
     const picHit = this.findPictureAtClick(pageIdx, pageX, pageY);
     this.container.style.cursor = picHit ? 'pointer' : '';
     return;
   }
 
-  // 셀 bbox 캐싱 (같은 표면 재사용)
-  if (!this.cachedTableRef ||
-      this.cachedTableRef.sec !== tableRef.sec ||
-      this.cachedTableRef.ppi !== tableRef.ppi ||
-      this.cachedTableRef.ci !== tableRef.ci) {
-    try {
+  try {
+    const cacheKey = `${tableRef.sec}:${tableRef.ppi}:${tableRef.ci}`;
+    const lastKey = this.cachedTableRef
+      ? `${this.cachedTableRef.sec}:${this.cachedTableRef.ppi}:${this.cachedTableRef.ci}`
+      : null;
+    if (cacheKey !== lastKey || !this.cachedCellBboxes) {
       this.cachedCellBboxes = this.wasm.getTableCellBboxes(tableRef.sec, tableRef.ppi, tableRef.ci);
       this.cachedTableRef = tableRef;
-    } catch {
-      this.cachedCellBboxes = null;
-      this.cachedTableRef = null;
     }
-  }
-
-  if (!this.cachedCellBboxes || this.cachedCellBboxes.length === 0) {
-    this.tableResizeRenderer.clear();
-    if (this.container.style.cursor) {
+    const pageBboxes = this.cachedCellBboxes.filter((b: any) => b.pageIndex === pageIdx);
+    const edge = this.tableResizeRenderer.hitTestBorder(pageX, pageY, pageBboxes);
+    if (edge) {
+      this.container.style.cursor = edge.type === 'col' ? 'col-resize' : 'row-resize';
+      this.tableResizeRenderer.showMarker(edge, pageBboxes, this.viewportManager.getZoom());
+    } else {
       this.container.style.cursor = '';
+      this.tableResizeRenderer.clear();
     }
-    return;
-  }
-
-  // 해당 페이지의 셀만 필터
-  const pageBboxes = this.cachedCellBboxes.filter((b: any) => b.pageIndex === pageIdx);
-  if (pageBboxes.length === 0) {
+  } catch {
+    this.container.style.cursor = '';
     this.tableResizeRenderer.clear();
-    if (this.container.style.cursor) {
-      this.container.style.cursor = '';
-    }
-    return;
-  }
-
-  // 경계선 감지
-  const edge = this.tableResizeRenderer.hitTestBorder(pageX, pageY, pageBboxes);
-  if (edge) {
-    this.container.style.cursor = edge.type === 'row' ? 'row-resize' : 'col-resize';
-    this.tableResizeRenderer.showMarker(edge, pageBboxes, zoom);
-  } else {
-    this.tableResizeRenderer.clear();
-    if (this.container.style.cursor) {
-      this.container.style.cursor = '';
-    }
   }
 }
 

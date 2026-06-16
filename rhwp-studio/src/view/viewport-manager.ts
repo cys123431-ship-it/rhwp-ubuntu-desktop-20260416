@@ -11,7 +11,7 @@ export class ViewportManager {
   private onScrollBound: () => void;
   private onWheelBound: (e: WheelEvent) => void;
 
-  // Cached DOM properties to prevent layout thrashing
+  // Cached DOM properties refreshed on demand after Linux window resize/restore.
   private containerRect: DOMRect | null = null;
   private scrollContentWidth = 0;
 
@@ -71,7 +71,7 @@ export class ViewportManager {
     if (!this.container) return;
     this.viewportWidth = this.container.clientWidth;
     this.viewportHeight = this.container.clientHeight;
-    this.containerRect = this.container.getBoundingClientRect();
+    this.refreshContainerRect();
     
     const sc = this.container.querySelector('#scroll-content');
     if (sc) {
@@ -94,20 +94,17 @@ export class ViewportManager {
   }
 
   getContentX(clientX: number): number {
-    if (!this.containerRect) return 0;
-    return (clientX - this.containerRect.left) + this.scrollX;
+    const rect = this.getContainerRect();
+    return (clientX - rect.left) + this.scrollX;
   }
 
   getContentY(clientY: number): number {
-    if (!this.containerRect) return 0;
-    return (clientY - this.containerRect.top) + this.scrollY;
+    const rect = this.getContainerRect();
+    return (clientY - rect.top) + this.scrollY;
   }
 
   getContainerRect(): DOMRect {
-    if (!this.containerRect) {
-      this.containerRect = this.container?.getBoundingClientRect() ?? new DOMRect();
-    }
-    return this.containerRect;
+    return this.refreshContainerRect();
   }
 
   getViewportSize(): { width: number; height: number } {
@@ -128,5 +125,10 @@ export class ViewportManager {
       this.container.scrollTop = y;
       this.scrollY = this.container.scrollTop;
     }
+  }
+
+  private refreshContainerRect(): DOMRect {
+    this.containerRect = this.container?.getBoundingClientRect() ?? new DOMRect();
+    return this.containerRect;
   }
 }

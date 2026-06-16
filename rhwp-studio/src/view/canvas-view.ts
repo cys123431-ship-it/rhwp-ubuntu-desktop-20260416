@@ -67,6 +67,7 @@ export class CanvasView {
       const pageWidth = this.pages[0].width;
       if (pageWidth > 0 && containerWidth > 0) {
         const fitZoom = containerWidth / pageWidth;
+        this.eventBus.emit('view-mode-changed', '폭 맞춤');
         this.viewportManager.setZoom(Math.max(0.1, Math.min(fitZoom, 4.0)));
       }
     }
@@ -153,18 +154,8 @@ export class CanvasView {
     // Canvas를 DOM에 추가하고 위치를 설정한다
     canvas.style.top = `${this.virtualScroll.getPageOffset(pageIdx)}px`;
 
-    // 그리드 모드: 고정 left 좌표, 단일 열: CSS 중앙 정렬
-    const pageLeft = this.virtualScroll.getPageLeft(pageIdx);
-    if (pageLeft >= 0) {
-      canvas.style.left = `${Math.round(pageLeft)}px`;
-      canvas.style.transform = 'none';
-    } else {
-      const parentWidth = this.scrollContent.clientWidth;
-      const cssWidth = pageInfo ? pageInfo.width * zoom : canvas.width / dpr;
-      const calculatedLeft = Math.max(0, Math.floor((parentWidth - cssWidth) / 2));
-      canvas.style.left = `${calculatedLeft}px`;
-      canvas.style.transform = 'none';
-    }
+    canvas.style.left = `${Math.round(this.virtualScroll.getPageLeftInContent(pageIdx))}px`;
+    canvas.style.transform = 'none';
 
     this.scrollContent.appendChild(canvas);
 
@@ -285,17 +276,8 @@ export class CanvasView {
 
         // 위치 갱신
         existingCanvas.style.top = `${this.virtualScroll.getPageOffset(pageIdx)}px`;
-        const pageLeft = this.virtualScroll.getPageLeft(pageIdx);
-        if (pageLeft >= 0) {
-          existingCanvas.style.left = `${Math.round(pageLeft)}px`;
-          existingCanvas.style.transform = 'none';
-        } else {
-          const parentWidth = this.scrollContent.clientWidth;
-          const cssWidth = pageInfo ? pageInfo.width * zoom : existingCanvas.width / dpr;
-          const calculatedLeft = Math.max(0, Math.floor((parentWidth - cssWidth) / 2));
-          existingCanvas.style.left = `${calculatedLeft}px`;
-          existingCanvas.style.transform = 'none';
-        }
+        existingCanvas.style.left = `${Math.round(this.virtualScroll.getPageLeftInContent(pageIdx))}px`;
+        existingCanvas.style.transform = 'none';
 
         // WASM 렌더링 호출 (픽셀 갱신)
         try {

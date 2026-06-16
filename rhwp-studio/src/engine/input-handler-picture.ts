@@ -432,17 +432,10 @@ export function cleanupPictureResizeDrag(this: any): void {
 
 export function updatePictureMoveDrag(this: any, e: MouseEvent): void {
   if (!this.pictureMoveState) return;
-  const zoom = this.viewportManager.getZoom();
-  const sc = this.container.querySelector('#scroll-content');
-  if (!sc) return;
-  const cx = this.viewportManager.getContentX(e.clientX);
-    const cy = this.viewportManager.getContentY(e.clientY);
-  const pi = this.virtualScroll.getPageAtY(cy);
-  const po = this.virtualScroll.getPageOffset(pi);
-  const pw = this.virtualScroll.getPageWidth(pi);
-  const pl = (this.viewportManager.getContentWidth() - pw) / 2;
-  const px = (cx - pl) / zoom;
-  const py = (cy - po) / zoom;
+  const point = this.getPagePointFromClient(e.clientX, e.clientY);
+  if (!point) return;
+  const px = point.pageX;
+  const py = point.pageY;
 
   const deltaXpx = px - this.pictureMoveState.lastPageX;
   const deltaYpx = py - this.pictureMoveState.lastPageY;
@@ -505,10 +498,10 @@ export function finishPictureMoveDrag(this: any): void {
 /** 회전 드래그 중: 마우스 각도에 따라 실시간 회전 적용 */
 export function updatePictureRotateDrag(this: any, e: MouseEvent): void {
   if (!this.pictureRotateState) return;
-  const sc = this.container.querySelector('#scroll-content');
-  if (!sc) return;
-  const mx = this.viewportManager.getContentX(e.clientX);
-  const my = this.viewportManager.getContentY(e.clientY);
+  const point = this.getScrollContentPointFromClient(e.clientX, e.clientY);
+  if (!point) return;
+  const mx = point.x;
+  const my = point.y;
 
   const s = this.pictureRotateState;
   const currentAngle = Math.atan2(my - s.centerY, mx - s.centerX);
