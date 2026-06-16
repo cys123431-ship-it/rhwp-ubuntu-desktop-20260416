@@ -272,7 +272,7 @@ jobs:
           dpkg -L "$DEB_PACKAGE_NAME" | grep '/usr/bin/rhwp$'
           test -x /usr/bin/rhwp
           grep -Fx 'Name=Geulbit X' /usr/share/applications/rhwp.desktop
-          grep -Fx 'Exec=rhwp %F' /usr/share/applications/rhwp.desktop
+          grep -Fx 'Exec=/usr/bin/rhwp %F' /usr/share/applications/rhwp.desktop
           grep -Fx 'MimeType=application/x-hwp;application/vnd.hancom.hwpx;application/x-hwpx;' /usr/share/applications/rhwp.desktop
           grep -F '<glob pattern="*.hwp" weight="100"/>' /usr/share/mime/packages/rhwp-mime.xml
           grep -F '<glob pattern="*.hwpx" weight="100"/>' /usr/share/mime/packages/rhwp-mime.xml

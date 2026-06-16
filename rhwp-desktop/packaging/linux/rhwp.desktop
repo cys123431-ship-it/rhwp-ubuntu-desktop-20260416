@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Geulbit X
 Comment=Open and edit HWP and HWPX documents with Geulbit X
-Exec=rhwp %F
+Exec=/usr/bin/rhwp %F
 Icon=rhwp
 Terminal=false
 Type=Application
